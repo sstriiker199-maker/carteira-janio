@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+  <title>Carteira Janio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Primeira vez: criar ou importar -->
+<section id="tela-inicio" class="tela centro hidden">
+  <div class="cartao estreito">
+    <h1>Carteira Janio</h1>
+    <p class="sub">Suas carteiras ficam guardadas só neste computador, protegidas pela sua senha.</p>
+    <button id="btn-criar" class="primario largo">Criar cofre novo</button>
+    <button id="btn-importar" class="largo">Já tenho uma frase secreta (importar)</button>
+  </div>
+</section>
+
+<!-- Mostrar / digitar frase secreta -->
+<section id="tela-frase" class="tela centro hidden">
+  <div class="cartao">
+    <h2 id="frase-titulo">Sua frase secreta</h2>
+    <div id="frase-mostrar">
+      <p class="alerta">Anote estas 12 palavras <b>em papel</b>, na ordem. Com elas você recupera <b>todas</b> as suas carteiras em qualquer computador. Quem tiver estas palavras tem acesso ao seu dinheiro: nunca envie por foto, e-mail ou mensagem.</p>
+      <ol id="frase-palavras" class="palavras"></ol>
+      <label class="check"><input type="checkbox" id="frase-ok"> Anotei as 12 palavras em papel</label>
+    </div>
+    <div id="frase-digitar" class="hidden">
+      <p class="sub">Digite as 12 ou 24 palavras da sua frase secreta, separadas por espaço.</p>
+      <textarea id="frase-input" rows="3" spellcheck="false"></textarea>
+    </div>
+    <label>Nome da primeira carteira</label>
+    <input id="primeiro-nome" value="Janio 1">
+    <label>Crie uma senha (mínimo 8 caracteres)</label>
+    <input id="senha1" type="password">
+    <label>Repita a senha</label>
+    <input id="senha2" type="password">
+    <p id="frase-erro" class="erro"></p>
+    <div class="linha">
+      <button id="frase-voltar">Voltar</button>
+      <button id="frase-continuar" class="primario">Criar cofre</button>
+    </div>
+  </div>
+</section>
+
+<!-- Desbloquear -->
+<section id="tela-desbloquear" class="tela centro hidden">
+  <div class="cartao estreito">
+    <h1>Carteira Janio</h1>
+    <label>Senha</label>
+    <input id="senha-entrar" type="password" autofocus>
+    <p id="entrar-erro" class="erro"></p>
+    <button id="btn-entrar" class="primario largo">Entrar</button>
+  </div>
+</section>
+
+<!-- Tela principal -->
+<section id="tela-principal" class="tela hidden">
+  <aside>
+    <div class="logo">Carteira Janio</div>
+    <ul id="lista-carteiras"></ul>
+    <button id="btn-nova" class="primario largo">+ Nova carteira</button>
+    <div class="rodape-lateral">
+      <button id="btn-atualizacoes" class="link">Atualizações <span id="upd-badge" class="badge hidden">nova</span></button>
+      <button id="btn-config" class="link">Configurações</button>
+      <button id="btn-frase" class="link">Ver frase secreta</button>
+      <button id="btn-bloquear" class="link">Bloquear</button>
+    </div>
+  </aside>
+  <main>
+    <header>
+      <div>
+        <h2 id="nome-carteira"></h2>
+        <div class="enderecos">
+          <div><span class="rot">Ethereum / BNB / Polygon / Avalanche:</span> <code id="end-evm"></code> <button class="mini" data-copiar="end-evm">Copiar</button></div>
+          <div><span class="rot">Tron:</span> <code id="end-tron"></code> <button class="mini" data-copiar="end-tron">Copiar</button></div>
+        </div>
+      </div>
+      <div class="acoes">
+        <button id="btn-atualizar">Atualizar saldos</button>
+        <button id="btn-renomear">Renomear</button>
+        <button id="btn-exportar">Exportar chave</button>
+      </div>
+    </header>
+    <label class="check filtro"><input type="checkbox" id="so-com-saldo"> Mostrar só moedas com saldo</label>
+    <table>
+      <thead><tr><th>Moeda</th><th>Rede</th><th class="dir">Saldo</th><th></th></tr></thead>
+      <tbody id="tabela-moedas"></tbody>
+    </table>
+  </main>
+</section>
+
+<!-- Janela flutuante genérica -->
+<div id="modal-fundo" class="hidden">
+  <div id="modal" class="cartao"></div>
+</div>
+
+<div id="aviso" class="hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
