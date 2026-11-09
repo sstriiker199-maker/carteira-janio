@@ -1,6 +1,5 @@
 # Monta o instalador do Windows e publica em "Releases".
-# Uma versão nova só sai quando o campo "version" do package.json muda
-# (se a versão já existir publicada, o electron-builder não sobrescreve).
+# Uma versão nova só sai quando o campo "version" do package.json muda.
 name: Publicar versão
 
 on:
@@ -12,6 +11,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: publicar
+  cancel-in-progress: false
 
 jobs:
   windows:
@@ -25,28 +28,38 @@ jobs:
         with:
           node-version: 22
 
-      - name: Instalar dependências
-        run: npm install
-
-      - name: Limpar versão com envio incompleto
+      - name: Preparar versão
+        id: prep
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           V=$(node -p "require('./package.json').version")
-          if gh release view "v$V" >/dev/null 2>&1; then
-            if ! gh release view "v$V" --json assets -q '.assets[].name' | grep -q '\.exe$'; then
-              echo "Versão v$V sem instalador: apagando para enviar de novo"
-              gh release delete "v$V" -y --cleanup-tag
-            fi
+          echo "versao=$V" >> "$GITHUB_OUTPUT"
+          R="repos/$GITHUB_REPOSITORY/releases"
+          # Se esta versão já foi publicada com instalador, não faz nada
+          if gh api "$R?per_page=100" --jq ".[] | select(.draft == false and .tag_name == \"v$V\") | .assets[].name" | grep -q '\.exe$'; then
+            echo "Versão v$V já publicada."
+            echo "pular=1" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # Apaga versões quebradas (sem .exe) e rascunhos desta versão
+          gh api "$R?per_page=100" \
+            --jq ".[] | select(((([.assets[].name | endswith(\".exe\")] | any) | not)) or (.draft and .tag_name == \"v$V\")) | .id" |
+            while read -r id; do echo "Apagando $id"; gh api -X DELETE "$R/$id"; done
           git fetch --tags --force
           if ! git rev-parse "v$V" >/dev/null 2>&1; then
             git tag "v$V"
             git push origin "v$V"
           fi
+          gh release create "v$V" --draft --title "v$V" --notes "Versão $V da Carteira Janio"
 
-      - name: Montar e publicar instalador
+      - name: Instalar dependências
+        if: steps.prep.outputs.pular != '1'
+        run: npm install
+
+      - name: Montar e enviar instalador
+        if: steps.prep.outputs.pular != '1'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,9 +67,19 @@ jobs:
           set -o pipefail
           npx electron-builder --win --publish always 2>&1 | tee build.log || {
             echo "::error title=Falha no build::veja as linhas abaixo"
-            grep -iE 'message|"code"|resource|field|uploading|url|publishing|errors|already|\\u' build.log | grep -v ratelimit | tail -n 40 | while IFS= read -r line; do
+            grep -iE 'message|"code"|resource|field|uploading|url|publishing|errors|already' build.log | grep -v ratelimit | tail -n 40 | while IFS= read -r line; do
               clean=$(printf '%s' "$line" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-400)
               [ -n "$clean" ] && echo "::error::$clean"
             done
             exit 1
           }
+
+      - name: Publicar versão
+        if: steps.prep.outputs.pular != '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=${{ steps.prep.outputs.versao }}
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.draft and .tag_name == \"v$V\") | .id" | head -1)
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" -F draft=false -f make_latest=true --jq '.html_url'
