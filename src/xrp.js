@@ -100,4 +100,6 @@ async function confirmar(cfg, hash) {
   return 'pendente';
 }
 
-module.exports = { endereco, saldo, preparar, enviar, confirmar };
+const validar = (a) => xrpl.isValidClassicAddress(String(a || '').trim());
+
+module.exports = { endereco, validar, saldo, preparar, enviar, confirmar };

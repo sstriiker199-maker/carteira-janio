@@ -424,7 +424,8 @@ function enviar(assetId) {
     <p class="sub">Saldo: ${s && !s.erro ? esc(s.balance) + ' ' + esc(m.symbol) : '—'}</p>
     ${m.aviso ? `<p class="alerta">${esc(m.aviso)}</p>` : ''}
     <label>Enviar para (endereço ${tron ? 'Tron, começa com T' : '0x…'})</label>
-    <input id="e-para" spellcheck="false" placeholder="${tron ? 'T…' : '0x…'}">
+    <div class="campo-valor"><input id="e-para" spellcheck="false" placeholder="Cole o endereço de destino"><button id="e-verificar">Verificar</button></div>
+    <div id="e-verif" class="verif"></div>
     <label>…ou escolha uma das suas carteiras ou um favorito</label>
     <select id="e-minhas"><option value="">carregando…</option></select>
     ${m.memo === 'tag' ? `<label>Tag de destino (número) — obrigatória se o destino for uma corretora</label><input id="e-memo" inputmode="numeric" placeholder="ex.: 123456">` : ''}
@@ -443,8 +444,21 @@ function enviar(assetId) {
       if (d) { $('e-para').value = d.endereco; if ($('e-memo')) $('e-memo').value = d.memo; }
     } catch (e) { $('e-erro').textContent = e.message; }
     limparResumo();
+    verificar();
   };
-  $('e-para').oninput = limparResumo;
+  let verifTimer = null;
+  let enderecoBloqueado = false;
+  async function verificar() {
+    const r = await rpc('verificarEndereco', { assetId, endereco: $('e-para').value }).catch(() => ({ estado: 'vazio' }));
+    const el = $('e-verif');
+    if (!el) return;
+    enderecoBloqueado = r.estado === 'bloqueado';
+    el.className = 'verif ' + r.estado;
+    el.textContent = r.estado === 'vazio' ? '' : (r.estado === 'ok' ? '✅ ' : r.estado === 'atencao' ? '⚠️ ' : '❌ ') + r.mensagem;
+    $('e-calcular').disabled = enderecoBloqueado;
+  }
+  $('e-para').oninput = () => { limparResumo(); clearTimeout(verifTimer); verifTimer = setTimeout(verificar, 300); };
+  $('e-verificar').onclick = verificar;
   if ($('e-memo')) $('e-memo').oninput = limparResumo;
   $('e-valor').oninput = () => { usarMax = false; $('e-max').classList.remove('primario'); limparResumo(); };
   $('e-max').onclick = () => {
@@ -641,9 +655,17 @@ async function carregarMultiplos() {
     const w = lista[Number(tr.dataset.mm)];
     tr.querySelector('.mm-dsel').onchange = async (ev) => {
       const d = await resolverDestino(ev.target.value, assetId).catch(() => null);
-      if (d) { tr.querySelector('.mm-dest').value = d.endereco; if (tr.querySelector('.mm-memo')) tr.querySelector('.mm-memo').value = d.memo; }
+      if (d) { tr.querySelector('.mm-dest').value = d.endereco; if (tr.querySelector('.mm-memo')) tr.querySelector('.mm-memo').value = d.memo; tr.querySelector('.mm-dest').onblur(); }
     };
     tr.querySelector('.mm-max').onchange = (ev) => { tr.querySelector('.mm-valor').disabled = ev.target.checked; };
+    const verifLinha = async () => {
+      const r = await rpc('verificarEndereco', { assetId, endereco: tr.querySelector('.mm-dest').value }).catch(() => ({ estado: 'vazio' }));
+      const st = tr.querySelector('.mm-status');
+      st.className = 'mm-status verif ' + r.estado;
+      st.textContent = r.estado === 'vazio' ? '—' : (r.estado === 'ok' ? '✅ endereço ok' : r.estado === 'atencao' ? '⚠️ ' + r.mensagem : '❌ ' + r.mensagem);
+    };
+    tr.querySelector('.mm-dest').onchange = verifLinha;
+    tr.querySelector('.mm-dest').onblur = verifLinha;
     tr._w = w;
   }
   $('mm-todas').onclick = () => {

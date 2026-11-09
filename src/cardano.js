@@ -133,4 +133,8 @@ async function confirmar(cfg, hash) {
   return 'pendente';
 }
 
-module.exports = { endereco, saldo, preparar, enviar, confirmar };
+function validar(a) {
+  try { CSL.Address.from_bech32(String(a || '').trim()); return /^addr1/.test(String(a).trim()); } catch { return false; }
+}
+
+module.exports = { endereco, validar, saldo, preparar, enviar, confirmar };

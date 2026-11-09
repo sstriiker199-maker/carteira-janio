@@ -479,6 +479,50 @@ handle('monitorFoco', ({ index }) => { foco = Number(index); cicloMonitor(); ret
 handle('monitorAgora', () => { cicloMonitor(); return true; });
 handle('resumo', () => resumo());
 
+// ---------- Verificar endereço de destino ----------
+function enderecoValidoPara(net, a) {
+  a = String(a || '').trim();
+  if (!a) return false;
+  try {
+    if (net.kind === 'evm') return evm.isAddress(a);
+    if (net.kind === 'tron') return require('./src/tronaddr').isTronAddress(a);
+    if (net.kind === 'utxo') return !!MOD.utxo().scriptDestino(net.coin, a);
+    if (net.kind === 'solana') return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a) && !!MOD.solana().validar(a);
+    if (net.kind === 'ton') return /^(EQ|UQ|0:|-1:|kQ|0Q)/.test(a) && !!MOD.ton().validar(a);
+    return !!MOD[net.kind]().validar(a);
+  } catch { return false; }
+}
+
+handle('verificarEndereco', ({ assetId, endereco }) => {
+  const { asset, net } = getAsset(assetId);
+  const a = String(endereco || '').trim();
+  if (!a) return { estado: 'vazio' };
+  // de quais redes esse endereço parece ser
+  const vistas = new Set();
+  const redes = [];
+  for (const n of Object.values(NETWORKS)) {
+    const grupo = n.kind === 'evm' ? 'evm' : n.id;
+    if (vistas.has(grupo)) continue;
+    if (enderecoValidoPara(n, a)) { vistas.add(grupo); redes.push(n.kind === 'evm' ? 'Ethereum/BNB/Polygon/Avalanche (0x)' : n.rotulo); }
+  }
+  const nomeMoeda = `${asset.symbol} pela rede ${net.rotulo}`;
+  if (enderecoValidoPara(net, a)) {
+    let msg = `Endereço válido da rede ${net.kind === 'evm' ? net.rotulo : net.rotulo}.`;
+    if (net.kind === 'evm') msg += ` Endereços 0x servem para várias redes: confira se o destino aceita ${net.rotulo}.`;
+    let meu = null;
+    try {
+      const data = readJson(dataFile());
+      const w = data.wallets.find((x) => { try { return addressFor(x.index, net.id).toLowerCase() === a.toLowerCase(); } catch { return false; } });
+      if (w) meu = w.name;
+    } catch { /* ok */ }
+    return { estado: net.kind === 'evm' ? 'atencao' : 'ok', mensagem: msg + (meu ? ` É a sua carteira "${meu}".` : '') };
+  }
+  if (redes.length) {
+    return { estado: 'bloqueado', mensagem: `Este endereço é da rede ${redes.join(' / ')}, mas você está enviando ${nomeMoeda}. Envio bloqueado: o dinheiro seria perdido.` };
+  }
+  return { estado: 'bloqueado', mensagem: `Isso não parece um endereço da rede ${net.rotulo}. Confira se copiou o endereço inteiro.` };
+});
+
 // ---------- Contatos (endereços favoritos) ----------
 const contatosFile = () => path.join(dataDir(), 'contatos.json');
 handle('contatos', ({ rede }) => {
@@ -672,6 +716,7 @@ async function runTransfer(mode, { index, assetId, to, amount, max, velocidade, 
   await precos.atualizar().catch(() => {});
   const { asset, net } = getAsset(assetId);
   const w = getWallet(readJson(dataFile()), index);
+  if (!enderecoValidoPara(net, to)) throw new Error(`Endereço de destino não é da rede ${net.rotulo}. Envio bloqueado para não perder o dinheiro.`);
   const r = await prepararOuEnviar('estimate', { index, asset, net, to, amount, max, velocidade, memo });
   const plano = await planoTaxa(index, net, r);
   const nat = nativoDe(net);
@@ -912,6 +957,11 @@ app.whenReady().then(() => {
           await t('com saldo SOL', () => c('carteirasComSaldo', { assetId: 'sol', minUsd: 1 }));
           await t('plano juntar', async () => (await c('planoJuntar', { destino: 1, minUsd: 0.5 })).map(i => i.carteira + ':' + i.symbol + ':' + i.balance));
           await t('tela multiplos', async () => { document.getElementById('btn-multiplos').click(); await new Promise(r => setTimeout(r, 300)); document.getElementById('mm-moeda').value = 'sol'; await carregarMultiplos(); await new Promise(r => setTimeout(r, 1500)); const n = document.querySelectorAll('[data-mm]').length; const op = document.querySelector('.mm-dsel') ? document.querySelector('.mm-dsel').options.length : 0; fecharModal(); return n + ' linhas, ' + op + ' destinos'; });
+          await t('verif usdt-tron->sol', () => c('verificarEndereco', { assetId: 'usdt-tron', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk' }));
+          await t('verif sol ok', () => c('verificarEndereco', { assetId: 'sol', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk' }));
+          await t('verif bnb 0x', () => c('verificarEndereco', { assetId: 'usdt-bsc', endereco: '0x6Fac4D18c912343BF86fa7049364Dd4E424Ab9C0' }));
+          await t('verif btc errado', () => c('verificarEndereco', { assetId: 'btc', endereco: 'ltc1qjmxnz78nmc8nq77wuxh25n2es7rzm5c2rkk4wh' }));
+          await t('verif lixo', () => c('verificarEndereco', { assetId: 'xrp', endereco: 'abc123' }));
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));

@@ -140,3 +140,9 @@ table.multi td { vertical-align: top; }
 table.multi input, table.multi select { margin-bottom: 4px; padding: 6px 8px; }
 .mini-check { margin: 2px 0 0; font-size: 12px; }
 #modal.largo { max-width: 96vw; }
+
+.verif { font-size: 13px; margin: -6px 0 12px; min-height: 16px; }
+.verif.ok { color: #4ade80; }
+.verif.atencao { color: #fbbf24; }
+.verif.bloqueado { color: #f87171; }
+.mm-status.verif { margin: 0; }
