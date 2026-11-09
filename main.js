@@ -515,6 +515,7 @@ async function planoTaxa(index, net, r) {
 
 async function runTransfer(mode, { index, assetId, to, amount, max, velocidade }) {
   requireUnlocked();
+  await precos.atualizar().catch(() => {});
   const { asset, net } = getAsset(assetId);
   const w = getWallet(readJson(dataFile()), index);
   const r = await prepararOuEnviar('estimate', { index, asset, net, to, amount, max, velocidade });

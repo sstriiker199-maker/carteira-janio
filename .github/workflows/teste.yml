@@ -16,6 +16,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - name: Sondar servidores
+        shell: bash
+        run: |
+          bash .github/sondas/sondar.sh > sondas.txt 2>&1 || true
+          split -l 6 sondas.txt sonda_
+          for f in sonda_*; do echo "::notice::$(sed ':a;N;$!ba;s/\n/%0A/g' "$f")"; done
       - run: npm install
       - name: Abrir o app
         shell: bash
