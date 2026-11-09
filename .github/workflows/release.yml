@@ -17,9 +17,9 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -27,6 +27,16 @@ jobs:
         run: npm install
 
       - name: Montar e publicar instalador
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --publish always
+        run: |
+          set -o pipefail
+          npx electron-builder --win --publish always 2>&1 | tee build.log || {
+            echo "::error title=Falha no build::veja as linhas abaixo"
+            tail -n 40 build.log | while IFS= read -r line; do
+              clean=$(printf '%s' "$line" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-400)
+              [ -n "$clean" ] && echo "::error::$clean"
+            done
+            exit 1
+          }

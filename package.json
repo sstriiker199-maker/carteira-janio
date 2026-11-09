@@ -6,6 +6,10 @@
   "author": "Janio",
   "license": "UNLICENSED",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sstriiker199-maker/carteira-janio.git"
+  },
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win --publish never"
@@ -43,6 +47,8 @@
     "publish": [
       {
         "provider": "github",
+        "owner": "sstriiker199-maker",
+        "repo": "carteira-janio",
         "releaseType": "release"
       }
     ]
