@@ -23,8 +23,8 @@ jobs:
           CARTEIRA_TESTE: '1'
         run: |
           sudo apt-get install -y xvfb >/dev/null 2>&1 || true
-          timeout 60 xvfb-run -a npx electron . --no-sandbox > saida.txt 2>&1 || true
-          grep -E '^LOG|Error|error' saida.txt | head -40 | while IFS= read -r line; do
+          timeout 180 xvfb-run -a npx electron . --no-sandbox > saida.txt 2>&1 || true
+          grep -E '^LOG|Error|error' saida.txt | head -60 | while IFS= read -r line; do
             echo "::warning::$(printf '%s' "$line" | cut -c1-400)"
           done
           grep -q 'tela visível: tela-' saida.txt

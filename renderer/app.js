@@ -413,10 +413,10 @@ $('btn-config').onclick = async () => {
   $('m-fechar').onclick = fecharModal;
   $('c-padrao').onclick = () => { for (const i of document.querySelectorAll('[data-rpc]')) i.value = s.defaults[i.dataset.rpc]; };
   $('m-ok').onclick = async () => {
-    const rpc = {};
-    for (const i of document.querySelectorAll('[data-rpc]')) rpc[i.dataset.rpc] = i.value;
+    const servidores = {};
+    for (const i of document.querySelectorAll('[data-rpc]')) servidores[i.dataset.rpc] = i.value;
     try {
-      await rpc('saveSettings', { rpc, tronApiKey: $('c-tronkey').value });
+      await rpc('saveSettings', { rpc: servidores, tronApiKey: $('c-tronkey').value });
       fecharModal();
       aviso('Configurações salvas');
       atualizarSaldos();
