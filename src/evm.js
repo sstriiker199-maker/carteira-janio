@@ -36,22 +36,34 @@ async function balance(net, url, asset, address) {
   return { raw, decimals };
 }
 
+// Três velocidades de taxa. "esperado" = custo provável; "worst" = teto máximo.
 async function fees(net, p) {
   const block = await p.getBlock('latest');
+  const minPrio = parseUnits(String(net.minPriorityGwei || 0), 'gwei');
   if (block && block.baseFeePerGas != null) {
     let prio;
     try { prio = BigInt(await p.send('eth_maxPriorityFeePerGas', [])); } catch { prio = parseUnits('1', 'gwei'); }
-    const minPrio = parseUnits(String(net.minPriorityGwei || 0), 'gwei');
-    if (prio < minPrio) prio = minPrio;
-    const maxFee = block.baseFeePerGas * 2n + prio;
-    return { fields: { type: 2, maxFeePerGas: maxFee, maxPriorityFeePerGas: prio }, worst: maxFee };
+    const base = block.baseFeePerGas;
+    const mk = (pr) => {
+      if (pr < minPrio) pr = minPrio;
+      const maxFee = base * 2n + pr;
+      return { fields: { type: 2, maxFeePerGas: maxFee, maxPriorityFeePerGas: pr }, worst: maxFee, esperado: base + pr };
+    };
+    return { economica: mk(prio * 8n / 10n), normal: mk(prio), rapida: mk(prio * 15n / 10n + parseUnits('0.01', 'gwei')) };
   }
   const gp = BigInt(await p.send('eth_gasPrice', []));
-  return { fields: { type: 0, gasPrice: gp }, worst: gp };
+  const mk = (g) => {
+    if (g < minPrio) g = minPrio;
+    return { fields: { type: 0, gasPrice: g }, worst: g, esperado: g };
+  };
+  return { economica: mk(gp), normal: mk(gp * 11n / 10n), rapida: mk(gp * 15n / 10n) };
 }
 
+const VELOCIDADES = ['economica', 'normal', 'rapida'];
+
 // Monta a transação e confere saldo e taxa. Não envia nada.
-async function prepare({ net, url, asset, wallet, to, amount, max }) {
+// valorRaw: valor exato em unidades mínimas (usado pela carteira de taxas)
+async function prepare({ net, url, asset, wallet, to, amount, max, velocidade, valorRaw }) {
   const p = provider(net, url);
   const from = wallet.address;
   to = String(to || '').trim();
@@ -59,18 +71,24 @@ async function prepare({ net, url, asset, wallet, to, amount, max }) {
     throw new Error(`Endereço de destino inválido para a rede ${net.name}. Ele deve começar com 0x e ter 42 caracteres.`);
   }
   to = getAddress(to);
-  const [f, nativeBal] = await Promise.all([fees(net, p), p.getBalance(from)]);
+  const vel = VELOCIDADES.includes(velocidade) ? velocidade : 'normal';
+  const [tiers, nativeBal] = await Promise.all([fees(net, p), p.getBalance(from)]);
+  const f = tiers[vel];
 
   if (asset.native) {
     let gasLimit = 21000n;
     try { gasLimit = await p.estimateGas({ from, to, value: 1n }); } catch { /* usa 21000 */ }
-    const fee = gasLimit * f.worst;
-    const value = max ? nativeBal - fee : parseAmount(amount, asset.decimals);
-    if (value <= 0n) throw new Error(`Saldo de ${asset.symbol} insuficiente para cobrir a taxa (${fmt(fee, 18)} ${net.symbol}).`);
-    if (value + fee > nativeBal) {
-      throw new Error(`Saldo insuficiente: valor + taxa (${fmt(fee, 18)} ${net.symbol}) passa do seu saldo de ${fmt(nativeBal, 18)} ${asset.symbol}.`);
+    const feeMax = gasLimit * f.worst;
+    const value = valorRaw != null ? BigInt(valorRaw) : max ? nativeBal - feeMax : parseAmount(amount, asset.decimals);
+    if (value <= 0n) throw new Error(`Saldo de ${asset.symbol} insuficiente para cobrir a taxa (${fmt(feeMax, 18)} ${net.symbol}).`);
+    if (value + feeMax > nativeBal) {
+      throw new Error(`Saldo insuficiente: valor + taxa (${fmt(feeMax, 18)} ${net.symbol}) passa do saldo de ${fmt(nativeBal, 18)} ${asset.symbol}.`);
     }
-    return { tx: { to, value, gasLimit, ...f.fields }, value, decimals: asset.decimals, fee, feeDecimals: 18, to };
+    return {
+      tx: { to, value, gasLimit, ...f.fields }, value, decimals: asset.decimals, to,
+      fee: gasLimit * f.esperado, feeMax, feeDecimals: 18, velocidade: vel,
+      opcoes: Object.fromEntries(VELOCIDADES.map((v) => [v, gasLimit * tiers[v].esperado]))
+    };
   }
 
   const decimals = await tokenDecimals(p, asset);
@@ -82,15 +100,21 @@ async function prepare({ net, url, asset, wallet, to, amount, max }) {
   const data = ERC20.encodeFunctionData('transfer', [to, value]);
   let gasLimit;
   try { gasLimit = (await p.estimateGas({ from, to: asset.contract, data })) * 12n / 10n; } catch { gasLimit = 120000n; }
-  const fee = gasLimit * f.worst;
-  if (fee > nativeBal) {
-    throw new Error(`Para enviar ${asset.symbol} você precisa de cerca de ${fmt(fee, 18)} ${net.symbol} nesta carteira para pagar a taxa. Saldo atual: ${fmt(nativeBal, 18)} ${net.symbol}.`);
-  }
-  return { tx: { to: asset.contract, data, value: 0n, gasLimit, ...f.fields }, value, decimals, fee, feeDecimals: 18, to };
+  const feeMax = gasLimit * f.worst;
+  return {
+    tx: { to: asset.contract, data, value: 0n, gasLimit, ...f.fields }, value, decimals, to,
+    fee: gasLimit * f.esperado, feeMax, feeDecimals: 18, velocidade: vel,
+    opcoes: Object.fromEntries(VELOCIDADES.map((v) => [v, gasLimit * tiers[v].esperado])),
+    nativeBal,
+    faltaTaxa: feeMax > nativeBal ? feeMax - nativeBal : 0n
+  };
 }
 
 async function send(args) {
   const prep = await prepare(args);
+  if (prep.faltaTaxa > 0n) {
+    throw new Error(`Para enviar ${args.asset.symbol} você precisa de cerca de ${fmt(prep.feeMax, 18)} ${args.net.symbol} nesta carteira para pagar a taxa. Saldo atual: ${fmt(prep.nativeBal, 18)} ${args.net.symbol}.`);
+  }
   const signer = args.wallet.connect(provider(args.net, args.url));
   const resp = await signer.sendTransaction({ ...prep.tx, chainId: args.net.chainId });
   return { hash: resp.hash, ...prep };

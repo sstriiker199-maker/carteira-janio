@@ -49,17 +49,17 @@ async function balance(cfg, asset, address) {
   return { raw: value, decimals };
 }
 
-async function prepare({ cfg, asset, from, to, amount, max }) {
+async function prepare({ cfg, asset, from, to, amount, max, valorRaw }) {
   to = String(to || '').trim();
   if (!isTronAddress(to)) throw new Error('Endereço de destino inválido para a rede Tron. Ele deve começar com T e ter 34 caracteres.');
   const t = client(cfg);
   const trxBal = BigInt(await retry(() => t.trx.getBalance(from)));
 
   if (asset.native) {
-    const value = max ? trxBal - TRX_RESERVE_SUN : parseAmount(amount, 6);
+    const value = valorRaw != null ? BigInt(valorRaw) : max ? trxBal - TRX_RESERVE_SUN : parseAmount(amount, 6);
     if (value <= 0n) throw new Error('Saldo de TRX insuficiente. É preciso deixar cerca de 1,5 TRX para a taxa.');
     if (value + 1_100_000n > trxBal) throw new Error(`Deixe pelo menos 1,1 TRX na carteira para a taxa (saldo: ${fmt(trxBal, 6)} TRX).`);
-    return { value, decimals: 6, fee: 1_100_000n, feeDecimals: 6, feeLabel: 'até', to };
+    return { value, decimals: 6, fee: 1_100_000n, feeMax: 1_100_000n, feeDecimals: 6, feeLabel: 'até', to };
   }
 
   const decimals = await tokenDecimals(t, asset, from);
@@ -87,10 +87,7 @@ async function prepare({ cfg, asset, from, to, amount, max }) {
     freeEnergy = Math.max(0, (r.EnergyLimit || 0) - (r.EnergyUsed || 0));
   } catch { /* sem energia própria */ }
   const fee = BigInt(Math.max(0, energy - freeEnergy) * energyPrice + 350_000);
-  if (fee > trxBal) {
-    throw new Error(`Para enviar ${asset.symbol} na rede Tron você precisa de cerca de ${fmt(fee, 6)} TRX nesta carteira para pagar a taxa. Saldo atual: ${fmt(trxBal, 6)} TRX.`);
-  }
-  return { value, decimals, fee, feeDecimals: 6, feeLabel: 'cerca de', to };
+  return { value, decimals, fee, feeMax: fee, feeDecimals: 6, feeLabel: 'cerca de', to, nativeBal: trxBal, faltaTaxa: fee > trxBal ? fee - trxBal : 0n };
 }
 
 function decodeMsg(m) {
@@ -99,7 +96,10 @@ function decodeMsg(m) {
 }
 
 async function send({ cfg, asset, from, privateKey, to, amount, max }) {
-  const prep = await prepare({ cfg, asset, from, to, amount, max });
+  const prep = await prepare({ cfg, asset, from, to, amount, max, valorRaw: arguments[0].valorRaw });
+  if (prep.faltaTaxa > 0n) {
+    throw new Error(`Para enviar ${asset.symbol} na rede Tron você precisa de cerca de ${fmt(prep.fee, 6)} TRX nesta carteira para pagar a taxa. Saldo atual: ${fmt(prep.nativeBal, 6)} TRX.`);
+  }
   const t = client(cfg, privateKey);
   let tx;
   if (asset.native) {

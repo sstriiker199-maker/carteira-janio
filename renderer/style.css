@@ -113,3 +113,20 @@ td.saldo .usd { color: #7d8496; font-size: 12px; margin-top: 2px; }
 #busca-res .res:hover { background: #2a3040; }
 #busca-res small { color: #9aa1b1; }
 #busca-res .cinza { padding: 8px; }
+
+.sobe { color: #4ade80 !important; }
+.desce { color: #f87171 !important; }
+#modal.largo { width: 860px; }
+.dolar-real { margin-bottom: 10px; font-size: 15px; }
+table.mercado td, table.mercado th { padding: 7px 8px; }
+.velocidades { display: flex; gap: 8px; margin: 10px 0 4px; }
+.vel { flex: 1; display: flex; flex-direction: column; gap: 2px; border: 1px solid #343a48; border-radius: 8px; padding: 8px; margin: 0; cursor: pointer; color: #e7e9ee; }
+.vel input { display: none; }
+.vel.ativa { border-color: #3b6cf6; background: #1e2a4a; }
+.filtros { justify-content: flex-start; margin-bottom: 10px; }
+.filtros select { width: auto; margin: 0; }
+.ativ { display: flex; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #262a35; }
+.ativ-ic { font-size: 20px; width: 28px; text-align: center; }
+.ativ-corpo { flex: 1; min-width: 0; }
+.ativ-det { color: #9aa1b1; font-size: 13px; margin-top: 3px; word-break: break-all; }
+#at-lista { max-height: 60vh; overflow-y: auto; }

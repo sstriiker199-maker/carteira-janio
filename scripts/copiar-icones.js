@@ -23,3 +23,26 @@ for (const s of SIMBOLOS) {
   }
 }
 console.log('Ícones copiados: ' + copiados.join(', '));
+
+// Tokens que não estão no pacote: logo oficial do repositório público da Trust Wallet
+const TOKENS = {
+  shib: 'ethereum/assets/0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',
+  pepe: 'ethereum/assets/0x6982508145454Ce325dDbE47a25d4ec3d2311933',
+  lblock: 'ethereum/assets/0x2b867efD2dE4Ad2B583Ca0CB3dF9C4040Ef4D329',
+  bonk: 'solana/assets/DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+  pol: 'polygon/info',
+  ton: 'ton/info'
+};
+(async () => {
+  for (const [nome, caminho] of Object.entries(TOKENS)) {
+    if (fs.existsSync(path.join(destino, nome + '.svg'))) continue;
+    try {
+      const r = await fetch(`https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${caminho}/logo.png`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      fs.writeFileSync(path.join(destino, nome + '.png'), Buffer.from(await r.arrayBuffer()));
+      console.log('Logo baixado: ' + nome);
+    } catch (e) {
+      console.log('Sem logo para ' + nome + ': ' + e.message);
+    }
+  }
+})();

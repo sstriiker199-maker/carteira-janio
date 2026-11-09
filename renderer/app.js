@@ -2,6 +2,13 @@ const $ = (id) => document.getElementById(id);
 const rpc = (ch, arg) => window.api.call(ch, arg);
 const usdFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'USD' });
 const dolar = (v) => (v == null ? '' : usdFmt.format(v));
+// preço unitário: mostra mais casas para moedas baratas (SHIB, PEPE…)
+const precoFmt = (v) => {
+  if (v == null) return '';
+  if (v >= 1) return usdFmt.format(v);
+  const casas = Math.min(10, Math.max(4, 2 - Math.floor(Math.log10(v)) + 2));
+  return 'US$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: casas });
+};
 let totais = {}; // índice -> total em US$
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -120,7 +127,7 @@ async function carregarCarteiras() {
   $('lista-carteiras').innerHTML = carteiras.map((c) => `
     <li data-i="${c.index}" class="${c.index === atual ? 'ativa' : ''}">
       <div class="li-topo"><span>${esc(c.name)}</span><span class="li-total" data-total="${c.index}">${esc(dolar(totais[c.index]))}</span></div>
-      <small>${esc(c.evmAddress.slice(0, 8))}…${esc(c.evmAddress.slice(-6))}</small>
+      <small>${c.importada ? '📥 ' : ''}${esc(c.evmAddress.slice(0, 8))}…${esc(c.evmAddress.slice(-6))}</small>
     </li>`).join('');
   for (const li of $('lista-carteiras').querySelectorAll('li')) li.onclick = () => selecionar(Number(li.dataset.i));
 }
@@ -144,7 +151,7 @@ function selecionar(index) {
 }
 
 // ---------- Tabela: uma linha por moeda, com escolha da rede ----------
-const ICONES = { POL: 'matic' };
+const ICONES = {};
 const CORES = { LBLOCK: '#d4a017', PEPE: '#3d9a3d' };
 let redeEscolhida = {}; // símbolo -> assetId escolhido
 const escolhaManual = new Set();
@@ -192,16 +199,22 @@ function desenharTabela() {
       <td>${g.itens.length > 1
         ? `<select class="sel-rede" data-rede="${esc(g.symbol)}">${g.itens.map((m) => `<option value="${m.id}">${esc(m.rotulo)}</option>`).join('')}</select>`
         : `<span class="tag">${esc(g.itens[0].rotulo || g.itens[0].networkName)}</span>`}</td>
+      <td class="saldo"><div data-preco="${esc(g.symbol)}"></div><div class="usd" data-var="${esc(g.symbol)}"></div></td>
       <td class="saldo"><div data-saldo="${esc(g.symbol)}"></div><div class="usd" data-usd="${esc(g.symbol)}"></div></td>
       <td class="botoes">
         <button data-receber-g="${esc(g.symbol)}">Receber</button>
         <button data-enviar-g="${esc(g.symbol)}" class="primario">Enviar</button>
       </td>
-    </tr>`).join('') + '<tr id="linha-vazia" class="hidden"><td colspan="4" class="cinza">Nenhuma moeda com saldo nesta carteira.</td></tr>';
+    </tr>`).join('') + '<tr id="linha-vazia" class="hidden"><td colspan="5" class="cinza">Nenhuma moeda com saldo nesta carteira.</td></tr>';
 
   for (const img of document.querySelectorAll('img.icone')) {
-    img.addEventListener('error', () => {
+    img.addEventListener('error', function falhou() {
       const sim = img.dataset.icone;
+      if (img.src.endsWith('.svg')) {
+        img.src = img.src.replace(/\.svg$/, '.png');
+        img.addEventListener('error', falhou, { once: true });
+        return;
+      }
       const span = document.createElement('span');
       span.className = 'icone letra';
       span.textContent = sim.slice(0, 1);
@@ -231,7 +244,23 @@ function atualizarCelulas() {
     cel.classList.toggle('erro', !!(sld && sld.erro));
     cel.title = sld && sld.erro ? sld.erro : '';
     const celUsd = document.querySelector(`[data-usd="${g.symbol}"]`);
-    if (celUsd) celUsd.textContent = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
+    if (celUsd) {
+      let t = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
+      if (t && sld.ganho24h != null && Math.abs(sld.ganho24h) >= 0.005) t += ` · hoje ${sld.ganho24h >= 0 ? '+' : '−'}${dolar(Math.abs(sld.ganho24h))}`;
+      celUsd.textContent = t;
+      celUsd.classList.toggle('sobe', !!(sld && sld.ganho24h > 0.005));
+      celUsd.classList.toggle('desce', !!(sld && sld.ganho24h < -0.005));
+    }
+    const comPreco = g.itens.map((m) => saldos[m.id]).find((x) => x && x.preco != null);
+    const celPreco = document.querySelector(`[data-preco="${g.symbol}"]`);
+    const celVar = document.querySelector(`[data-var="${g.symbol}"]`);
+    if (celPreco) celPreco.textContent = comPreco ? precoFmt(comPreco.preco) : '';
+    if (celVar) {
+      const v = comPreco ? comPreco.var24h : null;
+      celVar.textContent = v == null ? '' : `${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2).replace('.', ',')}%`;
+      celVar.classList.toggle('sobe', v > 0);
+      celVar.classList.toggle('desce', v < 0);
+    }
     const sel = document.querySelector(`[data-rede="${g.symbol}"]`);
     if (sel) {
       if (sel.value !== id) sel.value = id;
@@ -423,7 +452,10 @@ function enviar(assetId) {
     if (c) c.remove();
   }
 
-  const dados = () => ({ index: atual, assetId, to: $('e-para').value.trim(), amount: usarMax ? '' : $('e-valor').value, max: usarMax });
+  let vel = 'normal';
+  const dados = () => ({ index: atual, assetId, to: $('e-para').value.trim(), amount: usarMax ? '' : $('e-valor').value, max: usarMax, velocidade: vel });
+  const NOMES_VEL = { economica: 'Econômica', normal: 'Normal', rapida: 'Rápida' };
+  const comUsd = (v, u) => `${esc(v)}${u != null ? ` <span class="cinza">(≈ ${esc(dolar(u))})</span>` : ''}`;
 
   $('e-calcular').onclick = async () => {
     $('e-erro').textContent = '';
@@ -432,14 +464,26 @@ function enviar(assetId) {
     try {
       const r = await rpc('estimate', dados());
       const destino = carteiras.find((c) => c.evmAddress.toLowerCase() === r.to.toLowerCase() || c.tronAddress === r.to);
+      const velHtml = r.opcoes ? `<div class="velocidades">${Object.entries(r.opcoes).map(([v, o]) => `
+          <label class="vel ${v === r.velocidade ? 'ativa' : ''}"><input type="radio" name="vel" value="${v}" ${v === r.velocidade ? 'checked' : ''}>
+            <b>${NOMES_VEL[v]}</b><span>${esc(o.fee)} ${esc(r.feeSymbol)}</span><span class="cinza">${o.usd != null ? '≈ ' + esc(dolar(o.usd)) : ''}</span>
+          </label>`).join('')}</div>
+          ${r.velocidade === 'economica' ? '<p class="ajuda">Econômica pode demorar mais para confirmar se a rede estiver cheia.</p>' : ''}` : '';
       $('e-resumo').innerHTML = `<div class="resumo">
-        <div><span class="rot">Valor:</span> <b>${esc(r.amount)} ${esc(r.symbol)}</b></div>
+        <div><span class="rot">Valor:</span> <b>${esc(r.amount)} ${esc(r.symbol)}</b>${r.amountUsd != null ? ` <span class="cinza">(≈ ${esc(dolar(r.amountUsd))})</span>` : ''}</div>
         <div><span class="rot">Rede:</span> ${esc(r.networkName)}</div>
         <div><span class="rot">Para:</span> <code>${esc(r.to)}</code>${destino ? ` <span class="tag">${esc(destino.name)}</span>` : ''}</div>
-        <div><span class="rot">Taxa da rede:</span> ${esc(r.feeLabel)} ${esc(r.fee)} ${esc(r.feeSymbol)}</div>
+        <div><span class="rot">Taxa da rede:</span> ${esc(r.feeLabel)} ${comUsd(r.fee + ' ' + r.feeSymbol, r.feeUsd)}</div>
+        ${velHtml}
+        ${r.abastecer ? `<p class="alerta-rede">Esta carteira não tem ${esc(r.abastecer.simbolo)} para a taxa. Vou usar <b>${esc(r.abastecer.valor)} ${esc(r.abastecer.simbolo)}</b>${r.abastecer.usd != null ? ' (≈ ' + esc(dolar(r.abastecer.usd)) + ')' : ''} da carteira <b>${esc(r.abastecer.de)}</b> (+ taxa do abastecimento ${comUsd(r.abastecer.taxaAbastecer + ' ' + r.abastecer.simbolo, r.abastecer.taxaAbastecerUsd)}). Primeiro chega a taxa, depois o envio é feito.</p>` : ''}
       </div>
       <p class="sub">Confira o endereço. Envios em blockchain <b>não podem ser desfeitos</b>.</p>`;
+      for (const radio of document.querySelectorAll('input[name="vel"]')) {
+        radio.onchange = () => { vel = radio.value; $('e-calcular').onclick(); };
+      }
       $('e-calcular').classList.add('hidden');
+      const velha = $('e-confirmar');
+      if (velha) velha.remove();
       const conf = document.createElement('button');
       conf.id = 'e-confirmar';
       conf.className = 'perigo';
@@ -456,7 +500,7 @@ function enviar(assetId) {
 
   async function confirmar(btn) {
     btn.disabled = true;
-    btn.textContent = 'Enviando…';
+    btn.textContent = $('e-resumo').querySelector('.alerta-rede') ? 'Abastecendo taxa e enviando… (pode levar 1 min)' : 'Enviando…';
     $('e-cancelar').disabled = true;
     try {
       const r = await rpc('send', dados());
@@ -468,7 +512,7 @@ function enviar(assetId) {
           <div><span class="rot">Para:</span> <code>${esc(r.to)}</code></div>
           <div><span class="rot">Código (hash):</span> <code>${esc(r.hash)}</code></div>
         </div>
-        <p class="sub">A rede pode levar de alguns segundos a alguns minutos para confirmar. Depois clique em "Atualizar saldos".</p>
+        <p class="sub">A rede pode levar de alguns segundos a alguns minutos para confirmar. Você recebe um aviso quando confirmar.</p>
         <div class="linha"><button id="m-explorer">Ver no explorador</button><button id="m-fechar" class="primario">Fechar</button></div>`);
       $('m-explorer').onclick = () => rpc('openExternal', { url: r.explorer });
       $('m-fechar').onclick = () => { fecharModal(); rpc('monitorAgora').catch(() => {}); };
@@ -480,6 +524,124 @@ function enviar(assetId) {
     }
   }
 }
+
+// ---------- Mercado ----------
+let mercadoTimer = null;
+$('btn-mercado').onclick = async () => {
+  abrirModal(`
+    <h2>Mercado</h2>
+    <div id="mk-dolar" class="dolar-real"></div>
+    <div id="mk-lista" class="cinza">Carregando…</div>
+    <div class="linha"><button id="m-fechar" class="primario">Fechar</button></div>`);
+  $('modal').classList.add('largo');
+  const fechar = () => { clearInterval(mercadoTimer); $('modal').classList.remove('largo'); fecharModal(); };
+  $('m-fechar').onclick = fechar;
+  async function carregar() {
+    if (!$('mk-lista')) { clearInterval(mercadoTimer); return; }
+    let d;
+    try { d = await rpc('mercado'); } catch (e) { $('mk-lista').textContent = e.message; return; }
+    if (!$('mk-lista')) return;
+    const vfmt = (v) => (v == null ? '' : `<span class="${v >= 0 ? 'sobe' : 'desce'}">${v >= 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2).replace('.', ',')}%</span>`);
+    $('mk-dolar').innerHTML = d.dolar ? `💵 <b>Dólar:</b> R$ ${d.dolar.brl.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${vfmt(d.dolar.var24h)}` : '';
+    if (!d.moedas.length) { $('mk-lista').textContent = d.erro || 'Sem dados agora.'; return; }
+    const bi = (v) => v >= 1e9 ? 'US$ ' + (v / 1e9).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' bi' : 'US$ ' + (v / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + ' mi';
+    $('mk-lista').classList.remove('cinza');
+    $('mk-lista').innerHTML = `<table class="mercado"><thead><tr><th>#</th><th>Moeda</th><th class="dir">Preço</th><th class="dir">24h</th><th class="dir">Valor de mercado</th></tr></thead><tbody>
+      ${d.moedas.map((m) => `<tr><td class="cinza">${m.rank || ''}</td><td><b>${esc(m.symbol)}</b> <span class="cinza">${esc(m.name)}</span></td>
+        <td class="dir">${esc(precoFmt(m.usd))}</td><td class="dir">${vfmt(m.var24h)}</td><td class="dir cinza">${m.marketCap ? esc(bi(m.marketCap)) : ''}</td></tr>`).join('')}
+      </tbody></table><p class="ajuda">Preços ao vivo (Binance), atualizando a cada 3 segundos. Lista e valor de mercado: CoinGecko.</p>`;
+  }
+  await carregar();
+  mercadoTimer = setInterval(carregar, 3000);
+};
+
+// ---------- Atividade ----------
+$('btn-atividade').onclick = async () => {
+  abrirModal(`
+    <h2>Atividade</h2>
+    <div class="linha filtros">
+      <select id="at-carteira"><option value="">Todas as carteiras</option>${carteiras.map((c) => `<option value="${c.index}">${esc(c.name)}</option>`).join('')}</select>
+      <select id="at-tipo"><option value="">Tudo</option><option value="enviado">Enviados</option><option value="recebido">Recebidos</option><option value="taxa">Abastecimento de taxa</option><option value="importada">Carteiras importadas</option></select>
+    </div>
+    <div id="at-lista" class="cinza">Carregando…</div>
+    <div class="linha"><button id="m-fechar" class="primario">Fechar</button></div>`);
+  $('modal').classList.add('largo');
+  $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  $('at-carteira').onchange = carregarAtividade;
+  $('at-tipo').onchange = carregarAtividade;
+  await carregarAtividade();
+};
+
+async function carregarAtividade() {
+  if (!$('at-lista')) return;
+  const lista = await rpc('atividade', { index: $('at-carteira').value, tipo: $('at-tipo').value });
+  if (!lista.length) { $('at-lista').textContent = 'Nada por aqui ainda.'; return; }
+  const ICON = { enviado: '↗️', recebido: '↘️', taxa: '⛽', importada: '📥' };
+  const STATUS = { processando: '⏳ processando', confirmado: '✅ confirmado', falhou: '❌ falhou', pendente: '⏳ ainda não confirmado' };
+  $('at-lista').classList.remove('cinza');
+  $('at-lista').innerHTML = lista.map((e, i) => {
+    const quando = new Date(e.quando).toLocaleString('pt-BR');
+    let titulo = '';
+    let detalhe = '';
+    if (e.tipo === 'enviado') {
+      titulo = `Enviado ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
+      detalhe = `De <b>${esc(e.carteira)}</b> para ${e.destino ? '<b>' + esc(e.destino) + '</b> ' : ''}<code>${esc(e.para)}</code><br>Rede ${esc(e.rede)} · taxa ${esc(e.taxa || '')}${e.taxaUsd != null ? ' (≈ ' + esc(dolar(e.taxaUsd)) + ')' : ''}`;
+    } else if (e.tipo === 'recebido') {
+      titulo = `Recebido ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
+      detalhe = `Na carteira <b>${esc(e.carteira)}</b> · rede ${esc(e.rede)}`;
+    } else if (e.tipo === 'taxa') {
+      titulo = `Taxa abastecida: ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
+      detalhe = `De <b>${esc(e.carteira)}</b> para <b>${esc(e.destino)}</b> · rede ${esc(e.rede)}`;
+    } else {
+      titulo = `Carteira importada: ${esc(e.carteira)}`;
+    }
+    return `<div class="ativ">
+      <div class="ativ-ic">${ICON[e.tipo] || '•'}</div>
+      <div class="ativ-corpo">
+        <div class="li-topo"><b>${titulo}</b><span class="cinza">${esc(quando)}</span></div>
+        <div class="ativ-det">${detalhe}</div>
+        ${e.hash ? `<div class="ativ-det">${STATUS[e.status] || ''} · <code>${esc(e.hash.slice(0, 18))}…</code> <button class="mini" data-ver="${i}">Ver transação</button></div>` : ''}
+      </div></div>`;
+  }).join('');
+  for (const b of document.querySelectorAll('[data-ver]')) b.onclick = () => rpc('openExternal', { url: lista[Number(b.dataset.ver)].explorer });
+}
+window.api.onAtividade(() => { if ($('at-lista')) carregarAtividade(); });
+
+// ---------- Importar carteira ----------
+$('btn-importar-carteira').onclick = () => {
+  abrirModal(`
+    <h2>Importar carteira</h2>
+    <p class="sub">Traga uma carteira de outro app (MetaMask, Trust Wallet…). Ela fica guardada criptografada com a sua senha.</p>
+    <label>O que você vai colar?</label>
+    <select id="i-tipo"><option value="chave">Chave privada (uma conta)</option><option value="frase">12 ou 24 palavras (várias contas)</option></select>
+    <label id="i-rot">Chave privada</label>
+    <textarea id="i-segredo" rows="2" spellcheck="false"></textarea>
+    <p class="ajuda" id="i-ajuda">Na MetaMask: clique na conta → Detalhes da conta → Mostrar chave privada.</p>
+    <label>Nome</label>
+    <input id="i-nome" value="MetaMask">
+    <div id="i-qtd-box" class="hidden"><label>Quantas contas trazer</label><input id="i-qtd" type="number" min="1" max="50" value="1"></div>
+    <p class="alerta">Nunca cole sua chave ou suas palavras em sites ou mensagens. Só aqui dentro do programa.</p>
+    <p id="m-erro" class="erro"></p>
+    <div class="linha"><button id="m-fechar">Cancelar</button><button id="m-ok" class="primario">Importar</button></div>`);
+  $('m-fechar').onclick = fecharModal;
+  $('i-tipo').onchange = () => {
+    const frase = $('i-tipo').value === 'frase';
+    $('i-rot').textContent = frase ? 'Palavras (separadas por espaço)' : 'Chave privada';
+    $('i-ajuda').textContent = frase ? 'Conta 1 da MetaMask = primeira carteira, Conta 2 = segunda…' : 'Na MetaMask: clique na conta → Detalhes da conta → Mostrar chave privada.';
+    $('i-qtd-box').classList.toggle('hidden', !frase);
+  };
+  $('m-ok').onclick = async () => {
+    $('m-ok').disabled = true;
+    try {
+      const novas = await rpc('importWallet', { tipo: $('i-tipo').value, segredo: $('i-segredo').value, name: $('i-nome').value, quantidade: $('i-qtd').value });
+      $('i-segredo').value = '';
+      fecharModal();
+      await carregarCarteiras();
+      selecionar(novas[0].index);
+      aviso(novas.length > 1 ? `${novas.length} carteiras importadas` : 'Carteira importada');
+    } catch (e) { $('m-erro').textContent = e.message; $('m-ok').disabled = false; }
+  };
+};
 
 // ---------- Segurança ----------
 function pedirSenha(titulo, explicacao, aoConfirmar) {
@@ -535,6 +697,12 @@ $('btn-config').onclick = async () => {
     <label>Atualizar a carteira aberta a cada</label>
     <select id="c-intervalo">${[3, 5, 10, 30, 60].map((n) => `<option value="${n}" ${s.intervalo === n ? 'selected' : ''}>${n} segundos</option>`).join('')}</select>
     <p class="ajuda">As outras carteiras são conferidas a cada 1 minuto (para avisar quando chegar dinheiro).</p>
+
+    <div class="secao">
+      <h3>Carteira de taxas</h3>
+      <select id="c-taxas"><option value="">— nenhuma —</option>${carteiras.map((c) => `<option value="${c.index}" ${s.carteiraTaxas === c.index ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+      <p class="ajuda">Quando uma carteira não tiver BNB/TRX/ETH/POL para pagar a taxa de um envio, o programa manda o necessário desta carteira automaticamente.</p>
+    </div>
 
     <div class="secao">
       <h3>Notificações no computador</h3>
@@ -594,6 +762,7 @@ $('btn-config').onclick = async () => {
         rpc: servidores,
         tronApiKey: $('c-tronkey').value,
         intervalo: Number($('c-intervalo').value),
+        carteiraTaxas: $('c-taxas').value,
         notificar: { entradas: $('c-not-entradas').checked, envios: $('c-not-envios').checked },
         email: emailForm()
       });

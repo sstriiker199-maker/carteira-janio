@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron');
 const alertas = require('./src/alertas');
 const path = require('path');
 const fs = require('fs');
-const { Mnemonic, HDNodeWallet, randomBytes, formatUnits } = require('ethers');
+const { Mnemonic, HDNodeWallet, Wallet, randomBytes, formatUnits } = require('ethers');
 const precos = require('./src/precos');
 const QRCode = require('qrcode');
 
@@ -59,6 +59,7 @@ function settings() {
     rpc,
     tronApiKey: s.tronApiKey || '',
     intervalo: Math.max(3, Number(s.intervalo) || 3),
+    carteiraTaxas: s.carteiraTaxas != null ? Number(s.carteiraTaxas) : null,
     notificar: { entradas: n.entradas !== false, envios: n.envios !== false },
     email: {
       ativo: !!e.ativo, usuario: e.usuario || '', destino: e.destino || '',
@@ -72,19 +73,36 @@ function requireUnlocked() {
   if (!session) throw new Error('A carteira está bloqueada. Digite sua senha.');
 }
 
+// Carteiras: "frase principal" (padrão), "chave" (chave privada importada) ou "frase" importada
+function registroCarteira(index) {
+  const data = readJson(dataFile());
+  return data && data.wallets.find((x) => x.index === Number(index));
+}
+
 function keysFor(index) {
   requireUnlocked();
   if (!keyCache[index]) {
-    const m = Mnemonic.fromPhrase(session.phrase);
-    const evmWallet = HDNodeWallet.fromMnemonic(m, `m/44'/60'/0'/0/${index}`);
-    const tronNode = HDNodeWallet.fromMnemonic(m, `m/44'/195'/0'/0/${index}`);
-    keyCache[index] = {
-      evm: evmWallet,
-      tronPrivateKey: tronNode.privateKey.slice(2),
-      tronAddress: tronFromEvm(tronNode.address)
-    };
+    const w = registroCarteira(index) || { index };
+    if (w.origem === 'chave') {
+      const pk = session.extras.chaves[w.chave];
+      if (!pk) throw new Error('Chave da carteira importada não encontrada.');
+      const evmWallet = new Wallet(pk);
+      keyCache[index] = { evm: evmWallet, tronPrivateKey: pk.replace(/^0x/, ''), tronAddress: tronFromEvm(evmWallet.address), soEvm: true };
+    } else {
+      const frase = w.origem === 'frase' ? session.extras.frases[w.grupo] : session.phrase;
+      if (!frase) throw new Error('Frase da carteira importada não encontrada.');
+      const d = w.deriv != null ? w.deriv : w.index;
+      const m = Mnemonic.fromPhrase(frase);
+      const evmWallet = HDNodeWallet.fromMnemonic(m, `m/44'/60'/0'/0/${d}`);
+      const tronNode = HDNodeWallet.fromMnemonic(m, `m/44'/195'/0'/0/${d}`);
+      keyCache[index] = { evm: evmWallet, tronPrivateKey: tronNode.privateKey.slice(2), tronAddress: tronFromEvm(tronNode.address) };
+    }
   }
   return keyCache[index];
+}
+
+function salvarExtras(data) {
+  data.extras = vault.encrypt(JSON.stringify(session.extras), session.senha);
 }
 
 function addressFor(index, networkId) {
@@ -134,14 +152,16 @@ handle('create', ({ phrase, password, firstName }) => {
     wallets: [{ name: (firstName || 'Carteira 1').trim(), index: 0 }],
     nextIndex: 1
   });
-  session = { phrase };
+  session = { phrase, senha: password, extras: { chaves: {}, frases: {} } };
   return true;
 });
 
 handle('unlock', ({ password }) => {
   const data = readJson(dataFile());
   if (!data) throw new Error('Nenhum cofre encontrado.');
-  session = { phrase: vault.decrypt(data.vault, password) };
+  const phrase = vault.decrypt(data.vault, password);
+  const extras = data.extras ? JSON.parse(vault.decrypt(data.extras, password)) : { chaves: {}, frases: {} };
+  session = { phrase, senha: password, extras };
   return true;
 });
 
@@ -156,7 +176,7 @@ handle('lock', () => {
 handle('wallets', () => {
   requireUnlocked();
   const data = readJson(dataFile());
-  return data.wallets.map((w) => ({ ...w, evmAddress: keysFor(w.index).evm.address, tronAddress: keysFor(w.index).tronAddress }));
+  return data.wallets.map((w) => ({ name: w.name, index: w.index, importada: !!w.origem, evmAddress: keysFor(w.index).evm.address, tronAddress: keysFor(w.index).tronAddress }));
 });
 
 handle('addWallet', ({ name }) => {
@@ -170,6 +190,51 @@ handle('addWallet', ({ name }) => {
   data.nextIndex += 1;
   writeJson(dataFile(), data);
   return w;
+});
+
+// Importar carteira de outro app (ex.: MetaMask)
+handle('importWallet', ({ tipo, segredo, name, quantidade }) => {
+  requireUnlocked();
+  const data = readJson(dataFile());
+  name = String(name || '').trim() || 'Importada';
+  segredo = String(segredo || '').trim();
+  data.nextImport = data.nextImport || 100000;
+  const usados = new Set(data.wallets.map((w) => w.name.toLowerCase()));
+  const nomeLivre = (n) => { let x = n, i = 2; while (usados.has(x.toLowerCase())) x = `${n} (${i++})`; usados.add(x.toLowerCase()); return x; };
+  const enderecosExistentes = new Set(data.wallets.map((w) => keysFor(w.index).evm.address.toLowerCase()));
+  const novas = [];
+
+  if (tipo === 'chave') {
+    let pk = segredo.replace(/\s+/g, '');
+    if (!/^(0x)?[0-9a-fA-F]{64}$/.test(pk)) throw new Error('Chave privada inválida. Ela tem 64 letras/números (pode começar com 0x).');
+    if (!pk.startsWith('0x')) pk = '0x' + pk;
+    const addr = new Wallet(pk).address.toLowerCase();
+    if (enderecosExistentes.has(addr)) throw new Error('Essa carteira já está no programa.');
+    const id = 'k' + Date.now();
+    session.extras.chaves[id] = pk;
+    novas.push({ name: nomeLivre(name), index: data.nextImport++, origem: 'chave', chave: id });
+  } else {
+    const frase = segredo.toLowerCase().replace(/\s+/g, ' ');
+    if (!Mnemonic.isValidMnemonic(frase)) throw new Error('Frase inválida. Confira as palavras e a ordem.');
+    if (frase === session.phrase) throw new Error('Essa é a frase principal deste programa. Use "+ Nova carteira".');
+    const qtd = Math.min(50, Math.max(1, Number(quantidade) || 1));
+    const grupo = 'g' + Date.now();
+    session.extras.frases[grupo] = frase;
+    const m = Mnemonic.fromPhrase(frase);
+    for (let i = 0; i < qtd; i++) {
+      const addr = HDNodeWallet.fromMnemonic(m, `m/44'/60'/0'/0/${i}`).address.toLowerCase();
+      if (enderecosExistentes.has(addr)) continue;
+      novas.push({ name: nomeLivre(qtd > 1 ? `${name} ${i + 1}` : name), index: data.nextImport++, origem: 'frase', grupo, deriv: i });
+    }
+    if (!novas.length) throw new Error('Essas contas já estão no programa.');
+  }
+  data.wallets.push(...novas);
+  for (const n of novas) registrar({ tipo: 'importada', index: n.index, carteira: n.name });
+  salvarExtras(data);
+  writeJson(dataFile(), data);
+  ultimoGeral = 0;
+  cicloMonitor();
+  return novas;
 });
 
 handle('renameWallet', ({ index, name }) => {
@@ -249,8 +314,39 @@ function abrirJanela() {
   win.focus();
 }
 
+// ---------- Atividade (histórico local) ----------
+const ativFile = () => path.join(dataDir(), 'atividade.json');
+function registrar(ev) {
+  const lista = readJson(ativFile()) || [];
+  ev.id = 'a' + Date.now() + Math.random().toString(36).slice(2, 6);
+  ev.quando = Date.now();
+  lista.unshift(ev);
+  if (lista.length > 3000) lista.length = 3000;
+  try { fs.writeFileSync(ativFile(), JSON.stringify(lista)); } catch (e) { log('[atividade] ' + e.message); }
+  if (win && !win.isDestroyed()) win.webContents.send('atividade', ev);
+  return ev.id;
+}
+function atualizarAtividade(id, campos) {
+  const lista = readJson(ativFile()) || [];
+  const ev = lista.find((x) => x.id === id);
+  if (!ev) return;
+  Object.assign(ev, campos);
+  try { fs.writeFileSync(ativFile(), JSON.stringify(lista)); } catch { /* ignora */ }
+  if (win && !win.isDestroyed()) win.webContents.send('atividade', ev);
+}
+handle('atividade', ({ index, tipo }) => {
+  let lista = readJson(ativFile()) || [];
+  if (index != null && index !== '') lista = lista.filter((e) => e.index === Number(index) || e.indexDestino === Number(index));
+  if (tipo) lista = lista.filter((e) => e.tipo === tipo);
+  return lista.slice(0, 500);
+});
+
 function avisarEntrada(w, assetId, diff, decimals) {
   const { asset, net } = getAsset(assetId);
+  registrar({
+    tipo: 'recebido', index: w.index, carteira: w.name, valor: fmt(diff, decimals), symbol: asset.symbol,
+    rede: net.rotulo || net.name, usd: valorUsd(assetId, diff, decimals)
+  });
   alertas.avisar({
     cfg: settings(), tipo: 'entradas', log, aoClicar: abrirJanela,
     titulo: `Chegou ${fmt(diff, decimals)} ${asset.symbol}`,
@@ -275,7 +371,14 @@ async function verificarCarteira(w) {
     if (antes != null && r.raw > antes) avisarEntrada(w, r.assetId, r.raw - antes, r.decimals);
     ultimos[k] = r.raw.toString();
     (saldosMem[w.index] = saldosMem[w.index] || {})[r.assetId] = { raw: r.raw, decimals: r.decimals };
-    lista.push({ assetId: r.assetId, balance: fmt(r.raw, r.decimals), zero: r.raw === 0n, usd: valorUsd(r.assetId, r.raw, r.decimals) });
+    const sym = getAsset(r.assetId).asset.symbol;
+    const usd = valorUsd(r.assetId, r.raw, r.decimals);
+    const v = precos.variacao(sym);
+    lista.push({
+      assetId: r.assetId, balance: fmt(r.raw, r.decimals), zero: r.raw === 0n, usd,
+      preco: precos.preco(sym), var24h: v,
+      ganho24h: usd != null && v != null ? usd * v / (100 + v) : null
+    });
   }
   if (win && !win.isDestroyed()) win.webContents.send('saldos', { index: w.index, saldos: lista, quando: Date.now() });
 }
@@ -310,6 +413,13 @@ handle('monitorFoco', ({ index }) => { foco = Number(index); cicloMonitor(); ret
 handle('monitorAgora', () => { cicloMonitor(); return true; });
 handle('resumo', () => resumo());
 
+handle('mercado', async () => {
+  await precos.atualizar().catch(() => {});
+  let erro = null;
+  try { await precos.atualizarMercado(); } catch (e) { erro = 'Lista do mercado indisponível agora (' + e.message + ')'; }
+  return { moedas: precos.mercadoAoVivo(), dolar: precos.dolar(), erro };
+});
+
 // Busca uma moeda em todas as carteiras (usa os últimos saldos conferidos)
 handle('buscarMoeda', ({ texto }) => {
   requireUnlocked();
@@ -335,7 +445,7 @@ handle('buscarMoeda', ({ texto }) => {
 });
 
 // Acompanha um envio até ser confirmado na rede
-async function acompanharEnvio(net, hash, texto, w) {
+async function acompanharEnvio(net, hash, texto, w, idAtiv) {
   const cfgTron = { rpc: settings().rpc.tron, apiKey: settings().tronApiKey };
   let res = 'pendente';
   try {
@@ -343,6 +453,7 @@ async function acompanharEnvio(net, hash, texto, w) {
   } catch (e) {
     log('[acompanhar] ' + e.message);
   }
+  if (idAtiv) atualizarAtividade(idAtiv, { status: res === 'ok' ? 'confirmado' : res === 'falhou' ? 'falhou' : 'pendente' });
   const titulos = { ok: 'Envio confirmado ✓', falhou: 'Envio FALHOU na rede', pendente: 'Envio ainda não confirmado' };
   alertas.avisar({
     cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela,
@@ -359,37 +470,136 @@ handle('receive', async ({ index, assetId }) => {
   return { address, qr, symbol: asset.symbol, networkName: net.name, standard: net.standard, aviso: asset.aviso || '' };
 });
 
-async function runTransfer(mode, { index, assetId, to, amount, max }) {
-  requireUnlocked();
-  const { asset, net } = getAsset(assetId);
+function usdDe(symbol, raw, decimals) {
+  const p = precos.preco(symbol);
+  return p == null ? null : Number(formatUnits(raw, decimals)) * p;
+}
+
+function nativoDe(net) {
+  return ASSETS.find((a) => a.network === net.id && a.native);
+}
+
+async function prepararOuEnviar(mode, { index, asset, net, to, amount, max, velocidade, valorRaw }) {
   const s = settings();
   const k = keysFor(index);
-  let r;
   if (net.kind === 'tron') {
-    const args = { cfg: { rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, from: k.tronAddress, privateKey: k.tronPrivateKey, to, amount, max };
-    r = mode === 'send' ? await tron.send(args) : await tron.prepare(args);
-  } else {
-    const args = { net, url: s.rpc[net.id], asset, wallet: k.evm, to, amount, max };
-    r = mode === 'send' ? await evm.send(args) : await evm.prepare(args);
+    const args = { cfg: { rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, from: k.tronAddress, privateKey: k.tronPrivateKey, to, amount, max, valorRaw };
+    return mode === 'send' ? tron.send(args) : tron.prepare(args);
   }
+  const args = { net, url: s.rpc[net.id], asset, wallet: k.evm, to, amount, max, velocidade, valorRaw };
+  return mode === 'send' ? evm.send(args) : evm.prepare(args);
+}
+
+async function esperarConfirmacao(net, hash) {
+  const s = settings();
+  return net.kind === 'tron'
+    ? tron.waitConfirm({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, hash)
+    : evm.waitConfirm(net, s.rpc[net.id], hash);
+}
+
+// Se a carteira não tem moeda para a taxa, calcula quanto a carteira de taxas manda
+async function planoTaxa(index, net, r) {
+  if (!r.faltaTaxa || r.faltaTaxa <= 0n) return null;
+  const s = settings();
+  const data = readJson(dataFile());
+  const tanque = s.carteiraTaxas != null ? data.wallets.find((w) => w.index === s.carteiraTaxas) : null;
+  const nat = nativoDe(net);
+  const semTanque = `Esta carteira não tem ${net.symbol} para pagar a taxa (precisa de ~${fmt(r.feeMax, nat.decimals)} ${net.symbol}). ` +
+    'Mande um pouco para ela ou escolha uma "Carteira de taxas" em Configurações.';
+  if (!tanque) throw new Error(semTanque);
+  if (tanque.index === Number(index)) throw new Error(semTanque.replace('Mande um pouco para ela ou escolha uma', 'Abasteça a').replace('em Configurações', ''));
+  const extra = net.kind === 'tron' ? 500_000n : 0n;
+  const valor = r.faltaTaxa * 13n / 10n + extra;
+  return { tanque, valor, nat };
+}
+
+async function runTransfer(mode, { index, assetId, to, amount, max, velocidade }) {
+  requireUnlocked();
+  const { asset, net } = getAsset(assetId);
+  const w = getWallet(readJson(dataFile()), index);
+  const r = await prepararOuEnviar('estimate', { index, asset, net, to, amount, max, velocidade });
+  const plano = await planoTaxa(index, net, r);
+  const nat = nativoDe(net);
+
+  let abastecer = null;
+  if (plano) {
+    // confere se a carteira de taxas consegue pagar
+    const destinoTaxa = addressFor(index, net.id);
+    let prepTanque;
+    try {
+      prepTanque = await prepararOuEnviar('estimate', { index: plano.tanque.index, asset: plano.nat, net, to: destinoTaxa, valorRaw: plano.valor, velocidade });
+    } catch (e) {
+      throw new Error(`A carteira de taxas "${plano.tanque.name}" não tem ${net.symbol} suficiente: ${friendly(e)}`);
+    }
+    abastecer = {
+      de: plano.tanque.name,
+      valor: fmt(plano.valor, plano.nat.decimals),
+      simbolo: net.symbol,
+      usd: usdDe(net.symbol, plano.valor, plano.nat.decimals),
+      taxaAbastecer: fmt(prepTanque.fee, prepTanque.feeDecimals),
+      taxaAbastecerUsd: usdDe(net.symbol, prepTanque.fee, prepTanque.feeDecimals)
+    };
+  }
+
   const out = {
     amount: fmt(r.value, r.decimals, r.decimals),
+    amountUsd: usdDe(asset.symbol, r.value, r.decimals),
     symbol: asset.symbol,
     fee: fmt(r.fee, r.feeDecimals),
-    feeLabel: r.feeLabel || 'no máximo',
+    feeUsd: usdDe(net.symbol, r.fee, r.feeDecimals),
+    feeLabel: r.feeLabel || '≈',
     feeSymbol: net.symbol,
-    networkName: net.name,
+    velocidade: r.velocidade || null,
+    opcoes: r.opcoes ? Object.fromEntries(Object.entries(r.opcoes).map(([v, x]) => [v, { fee: fmt(x, r.feeDecimals), usd: usdDe(net.symbol, x, r.feeDecimals) }])) : null,
+    abastecer,
+    networkName: net.rotulo || net.name,
     to: r.to,
-    hash: r.hash || null,
-    explorer: r.hash ? net.explorer + r.hash : null
+    hash: null,
+    explorer: null
   };
-  if (mode === 'send' && r.hash) {
-    const w = getWallet(readJson(dataFile()), index);
-    const texto = `${out.amount} ${asset.symbol} na rede ${net.rotulo || net.name}`;
-    alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Envio em processamento…', corpo: `${texto} · carteira ${w.name}` });
-    acompanharEnvio(net, r.hash, texto, w);
-    setTimeout(cicloMonitor, 1500);
+  if (mode !== 'send') return out;
+
+  // 1) abastece a taxa, se precisar
+  if (plano) {
+    const destinoTaxa = addressFor(index, net.id);
+    alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Abastecendo taxa…', corpo: `${abastecer.valor} ${net.symbol} de ${plano.tanque.name} para ${w.name}` });
+    const t = await prepararOuEnviar('send', { index: plano.tanque.index, asset: plano.nat, net, to: destinoTaxa, valorRaw: plano.valor, velocidade });
+    const idTaxa = registrar({
+      tipo: 'taxa', index: plano.tanque.index, carteira: plano.tanque.name, indexDestino: w.index, destino: w.name,
+      valor: abastecer.valor, symbol: net.symbol, rede: net.rotulo || net.name, usd: abastecer.usd,
+      hash: t.hash, explorer: net.explorer + t.hash, status: 'processando'
+    });
+    const res = await esperarConfirmacao(net, t.hash);
+    atualizarAtividade(idTaxa, { status: res === 'ok' ? 'confirmado' : res });
+    if (res !== 'ok') throw new Error(`O abastecimento da taxa não confirmou (${res}). Nada de ${asset.symbol} foi enviado. Veja: ${net.explorer + t.hash}`);
+    // aviso de carteira de taxas acabando
+    try {
+      const sobra = await fetchBalance(plano.tanque.index, plano.nat.id);
+      if (sobra.raw < plano.valor * 3n) {
+        alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: `Carteira de taxas: ${net.symbol} acabando`, corpo: `Restam ${fmt(sobra.raw, sobra.decimals)} ${net.symbol} em ${plano.tanque.name}.` });
+      }
+    } catch { /* ignora */ }
   }
+
+  // 2) envia de verdade
+  const e = await prepararOuEnviar('send', { index, asset, net, to, amount, max, velocidade });
+  out.hash = e.hash;
+  out.explorer = net.explorer + e.hash;
+  out.amount = fmt(e.value, e.decimals, e.decimals);
+  const texto = `${out.amount} ${asset.symbol} na rede ${net.rotulo || net.name}`;
+  const dest = readJson(dataFile()).wallets.find((x) => {
+    try { return addressFor(x.index, net.id).toLowerCase() === String(e.to).toLowerCase(); } catch { return false; }
+  });
+  const idAtiv = registrar({
+    tipo: 'enviado', index: w.index, carteira: w.name, valor: out.amount, symbol: asset.symbol,
+    rede: net.rotulo || net.name, usd: usdDe(asset.symbol, e.value, e.decimals), para: e.to,
+    indexDestino: dest ? dest.index : undefined, destino: dest ? dest.name : undefined,
+    taxa: fmt(e.fee, e.feeDecimals) + ' ' + net.symbol, taxaUsd: usdDe(net.symbol, e.fee, e.feeDecimals),
+    hash: e.hash, explorer: net.explorer + e.hash, status: 'processando'
+  });
+  alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Envio em processamento…', corpo: `${texto} · carteira ${w.name}` });
+  acompanharEnvio(net, e.hash, texto, w, idAtiv);
+  setTimeout(cicloMonitor, 1500);
   return out;
 }
 
@@ -422,7 +632,7 @@ function montarEmail(email, anterior) {
   };
 }
 
-handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email }) => {
+handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteiraTaxas }) => {
   const clean = {};
   for (const id of Object.keys(NETWORKS)) {
     const u = String((rpc && rpc[id]) || '').trim();
@@ -436,6 +646,7 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email }) => {
     rpc: clean,
     tronApiKey: String(tronApiKey || '').trim(),
     intervalo: Math.max(3, Number(intervalo) || 3),
+    carteiraTaxas: carteiraTaxas === '' || carteiraTaxas == null ? null : Number(carteiraTaxas),
     notificar: { entradas: !(notificar && notificar.entradas === false), envios: !(notificar && notificar.envios === false) },
     email: em
   });
@@ -528,6 +739,15 @@ app.whenReady().then(() => {
           out.push('busca usdt ' + JSON.stringify(await c('buscarMoeda', { texto: 'usdt' })));
           out.push('lista lateral ' + [...document.querySelectorAll('#lista-carteiras li')].map(li => li.textContent.replace(/\\s+/g, ' ').trim()).join(' / '));
           out.push('usd celula ' + (document.querySelector('[data-usd="USDT"]') || {}).textContent);
+          out.push('preco ETH ' + (document.querySelector('[data-preco="ETH"]') || {}).textContent + ' / ' + (document.querySelector('[data-var="ETH"]') || {}).textContent);
+          const mk = await c('mercado');
+          out.push('mercado ' + mk.moedas.length + ' moedas; dolar ' + JSON.stringify(mk.dolar) + '; erro ' + mk.erro + '; top3 ' + mk.moedas.slice(0, 3).map(m => m.symbol + '=' + m.usd).join(','));
+          out.push('icones2 ' + [...document.querySelectorAll('img.icone')].filter(i => i.naturalWidth > 0).map(i => i.dataset.icone).join(','));
+          await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
+          await t('importar frase', async () => (await c('importWallet', { tipo: 'frase', segredo: 'test test test test test test test test test test test junk', name: 'Outra', quantidade: 2 })).map(w => w.name));
+          await t('lista final', async () => (await c('wallets')).map(w => w.name + ' ' + w.evmAddress.slice(0, 10) + ' ' + w.tronAddress.slice(0, 6) + (w.importada ? ' (imp)' : '')));
+          await t('estimar usdt-tron c/ taxa', () => c('estimate', { index: 1, assetId: 'usdt-tron', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount: '1' }));
+          await t('estimar bnb velocidades', async () => { try { return await c('estimate', { index: 0, assetId: 'bnb', to: '0x000000000000000000000000000000000000dEaD', amount: '0.001', velocidade: 'rapida' }); } catch (e) { return e.message; } });
           return out;
         })()`);
         for (const x of r) log('[teste] ' + x.slice(0, 300));
