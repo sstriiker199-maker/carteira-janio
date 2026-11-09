@@ -1,0 +1,30 @@
+# Abre o app num computador do GitHub (sem tela) e registra os erros como avisos.
+name: Teste de abertura
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+  workflow_dispatch:
+
+jobs:
+  abrir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Abrir o app
+        shell: bash
+        env:
+          CARTEIRA_TESTE: '1'
+        run: |
+          sudo apt-get install -y xvfb >/dev/null 2>&1 || true
+          timeout 60 xvfb-run -a npx electron . --no-sandbox > saida.txt 2>&1 || true
+          grep -E '^LOG|Error|error' saida.txt | head -40 | while IFS= read -r line; do
+            echo "::warning::$(printf '%s' "$line" | cut -c1-400)"
+          done
+          grep -q 'tela visível: tela-' saida.txt

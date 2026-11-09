@@ -16,6 +16,18 @@ let win = null;
 let session = null; // { phrase } enquanto desbloqueado
 const keyCache = {};
 
+// ---------- Registro de erros ----------
+function log(text) {
+  const line = `${new Date().toISOString()} ${text}\n`;
+  if (process.env.CARTEIRA_TESTE) process.stdout.write('LOG ' + line);
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.appendFileSync(path.join(app.getPath('userData'), 'log.txt'), line);
+  } catch { /* ignora */ }
+}
+process.on('uncaughtException', (e) => log(`[principal] ${e && e.stack}`));
+process.on('unhandledRejection', (e) => log(`[principal] ${e && (e.stack || e)}`));
+
 // ---------- Arquivos ----------
 const dataDir = () => app.getPath('userData');
 const dataFile = () => path.join(dataDir(), 'carteiras.json');
@@ -249,11 +261,35 @@ function createWindow() {
       sandbox: true
     }
   });
+  // Registro de erros da tela (arquivo log.txt na pasta de dados do app)
+  win.webContents.on('console-message', (e, level, message, line, source) => {
+    const msg = message ?? e.message;
+    const lvl = level ?? e.level;
+    const ln = line ?? e.lineNumber;
+    const src = source ?? e.sourceId;
+    log(`[tela:${lvl}] ${msg} (${src}:${ln})`);
+  });
+  win.webContents.on('preload-error', (_e, p, err) => log(`[preload] ${p}: ${err && err.stack}`));
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => log(`[carregar] ${code} ${desc} ${url}`));
+  win.webContents.on('render-process-gone', (_e, d) => log(`[tela caiu] ${JSON.stringify(d)}`));
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   updater.init(win);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  // Modo de teste automático (usado só pelo GitHub): abre, espera e fecha
+  if (process.env.CARTEIRA_TESTE) {
+    setTimeout(async () => {
+      try {
+        const vis = await win.webContents.executeJavaScript(
+          "[...document.querySelectorAll('.tela')].filter(t=>!t.classList.contains('hidden')).map(t=>t.id).join(',') || 'NENHUMA'");
+        log('[teste] tela visível: ' + vis);
+      } catch (e) { log('[teste] erro: ' + e.message); }
+      app.quit();
+    }, 8000);
+  }
+});
 app.on('window-all-closed', () => app.quit());
