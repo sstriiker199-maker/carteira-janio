@@ -1,10 +1,13 @@
-# Monta o instalador do Windows e publica em "Releases" sempre que uma versão nova (tag v*) é enviada.
+# Monta o instalador do Windows e publica em "Releases".
+# Uma versão nova só sai quando o campo "version" do package.json muda
+# (se a versão já existir publicada, o electron-builder não sobrescreve).
 name: Publicar versão
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
   workflow_dispatch:
 
 permissions:
