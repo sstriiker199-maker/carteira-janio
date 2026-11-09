@@ -2,7 +2,8 @@ const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron');
 const alertas = require('./src/alertas');
 const path = require('path');
 const fs = require('fs');
-const { Mnemonic, HDNodeWallet, randomBytes } = require('ethers');
+const { Mnemonic, HDNodeWallet, randomBytes, formatUnits } = require('ethers');
+const precos = require('./src/precos');
 const QRCode = require('qrcode');
 
 const vault = require('./src/vault');
@@ -147,6 +148,7 @@ handle('unlock', ({ password }) => {
 handle('lock', () => {
   session = null;
   foco = null;
+  for (const k of Object.keys(saldosMem)) delete saldosMem[k];
   for (const k of Object.keys(keyCache)) delete keyCache[k];
   return true;
 });
@@ -204,6 +206,32 @@ let ultimoGeral = 0;
 let timerMonitor = null;
 let rodando = false;
 let pedirDeNovo = false;
+const saldosMem = {}; // índice da carteira -> { assetId: { raw, decimals } }
+
+function valorUsd(assetId, raw, decimals) {
+  const p = precos.preco(getAsset(assetId).asset.symbol);
+  if (p == null) return null;
+  return Number(formatUnits(raw, decimals)) * p;
+}
+
+function resumo() {
+  const data = readJson(dataFile());
+  if (!data || !session) return [];
+  return data.wallets.map((w) => {
+    const m = saldosMem[w.index];
+    if (!m) return { index: w.index, totalUsd: null };
+    let total = 0;
+    for (const [assetId, v] of Object.entries(m)) {
+      const u = valorUsd(assetId, v.raw, v.decimals);
+      if (u) total += u;
+    }
+    return { index: w.index, totalUsd: total };
+  });
+}
+
+function enviarResumo() {
+  if (win && !win.isDestroyed()) win.webContents.send('resumo', resumo());
+}
 
 async function mapLimit(items, n, fn) {
   const out = new Array(items.length);
@@ -246,7 +274,8 @@ async function verificarCarteira(w) {
     const antes = ultimos[k] != null ? BigInt(ultimos[k]) : null;
     if (antes != null && r.raw > antes) avisarEntrada(w, r.assetId, r.raw - antes, r.decimals);
     ultimos[k] = r.raw.toString();
-    lista.push({ assetId: r.assetId, balance: fmt(r.raw, r.decimals), zero: r.raw === 0n });
+    (saldosMem[w.index] = saldosMem[w.index] || {})[r.assetId] = { raw: r.raw, decimals: r.decimals };
+    lista.push({ assetId: r.assetId, balance: fmt(r.raw, r.decimals), zero: r.raw === 0n, usd: valorUsd(r.assetId, r.raw, r.decimals) });
   }
   if (win && !win.isDestroyed()) win.webContents.send('saldos', { index: w.index, saldos: lista, quando: Date.now() });
 }
@@ -265,7 +294,8 @@ async function cicloMonitor() {
       const lista = data.wallets
         .filter((w) => todas || w.index === foco)
         .sort((a, b) => (a.index === foco ? -1 : b.index === foco ? 1 : 0));
-      for (const w of lista) await verificarCarteira(w);
+      await precos.atualizar().catch((e) => log('[preços] ' + e.message));
+      for (const w of lista) { await verificarCarteira(w); enviarResumo(); }
       fs.writeFileSync(saldosFile(), JSON.stringify(ultimos));
     }
   } catch (e) {
@@ -278,6 +308,31 @@ async function cicloMonitor() {
 
 handle('monitorFoco', ({ index }) => { foco = Number(index); cicloMonitor(); return true; });
 handle('monitorAgora', () => { cicloMonitor(); return true; });
+handle('resumo', () => resumo());
+
+// Busca uma moeda em todas as carteiras (usa os últimos saldos conferidos)
+handle('buscarMoeda', ({ texto }) => {
+  requireUnlocked();
+  const q = String(texto || '').trim().toLowerCase();
+  if (!q) return [];
+  const data = readJson(dataFile());
+  const out = [];
+  for (const w of data.wallets) {
+    const m = saldosMem[w.index] || {};
+    for (const a of ASSETS) {
+      if (!a.symbol.toLowerCase().includes(q) && !a.name.toLowerCase().includes(q)) continue;
+      const v = m[a.id];
+      if (!v || v.raw === 0n) continue;
+      out.push({
+        index: w.index, carteira: w.name, assetId: a.id, symbol: a.symbol,
+        rede: NETWORKS[a.network].rotulo || NETWORKS[a.network].name,
+        balance: fmt(v.raw, v.decimals), usd: valorUsd(a.id, v.raw, v.decimals)
+      });
+    }
+  }
+  out.sort((x, y) => (y.usd || 0) - (x.usd || 0));
+  return out;
+});
 
 // Acompanha um envio até ser confirmado na rede
 async function acompanharEnvio(net, hash, texto, w) {
@@ -469,6 +524,10 @@ app.whenReady().then(() => {
           out.push('letras ' + [...document.querySelectorAll('.icone.letra')].map(i => i.textContent).join(','));
           out.push('saldos ' + [...document.querySelectorAll('[data-saldo]')].map(x => x.dataset.saldo + '=' + x.textContent).join(' | '));
           out.push('hora ' + document.getElementById('hora-saldo').textContent);
+          out.push('resumo ' + JSON.stringify(await c('resumo')));
+          out.push('busca usdt ' + JSON.stringify(await c('buscarMoeda', { texto: 'usdt' })));
+          out.push('lista lateral ' + [...document.querySelectorAll('#lista-carteiras li')].map(li => li.textContent.replace(/\\s+/g, ' ').trim()).join(' / '));
+          out.push('usd celula ' + (document.querySelector('[data-usd="USDT"]') || {}).textContent);
           return out;
         })()`);
         for (const x of r) log('[teste] ' + x.slice(0, 300));

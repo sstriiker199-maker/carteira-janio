@@ -1,5 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const rpc = (ch, arg) => window.api.call(ch, arg);
+const usdFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'USD' });
+const dolar = (v) => (v == null ? '' : usdFmt.format(v));
+let totais = {}; // índice -> total em US$
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let modoFrase = 'criar'; // 'criar' | 'importar'
@@ -113,9 +116,11 @@ async function abrirPrincipal() {
 
 async function carregarCarteiras() {
   carteiras = await rpc('wallets');
+  try { for (const r of await rpc('resumo')) if (r.totalUsd != null) totais[r.index] = r.totalUsd; } catch { /* ok */ }
   $('lista-carteiras').innerHTML = carteiras.map((c) => `
     <li data-i="${c.index}" class="${c.index === atual ? 'ativa' : ''}">
-      ${esc(c.name)}<small>${esc(c.evmAddress.slice(0, 8))}…${esc(c.evmAddress.slice(-6))}</small>
+      <div class="li-topo"><span>${esc(c.name)}</span><span class="li-total" data-total="${c.index}">${esc(dolar(totais[c.index]))}</span></div>
+      <small>${esc(c.evmAddress.slice(0, 8))}…${esc(c.evmAddress.slice(-6))}</small>
     </li>`).join('');
   for (const li of $('lista-carteiras').querySelectorAll('li')) li.onclick = () => selecionar(Number(li.dataset.i));
 }
@@ -133,6 +138,7 @@ function selecionar(index) {
   $('end-tron').textContent = c.tronAddress;
   saldos = {};
   $('hora-saldo').textContent = '';
+  mostrarTotais();
   desenharTabela();
   rpc('monitorFoco', { index }).catch(() => {});
 }
@@ -186,7 +192,7 @@ function desenharTabela() {
       <td>${g.itens.length > 1
         ? `<select class="sel-rede" data-rede="${esc(g.symbol)}">${g.itens.map((m) => `<option value="${m.id}">${esc(m.rotulo)}</option>`).join('')}</select>`
         : `<span class="tag">${esc(g.itens[0].rotulo || g.itens[0].networkName)}</span>`}</td>
-      <td class="saldo" data-saldo="${esc(g.symbol)}"></td>
+      <td class="saldo"><div data-saldo="${esc(g.symbol)}"></div><div class="usd" data-usd="${esc(g.symbol)}"></div></td>
       <td class="botoes">
         <button data-receber-g="${esc(g.symbol)}">Receber</button>
         <button data-enviar-g="${esc(g.symbol)}" class="primario">Enviar</button>
@@ -224,6 +230,8 @@ function atualizarCelulas() {
     cel.classList.toggle('cinza', !sld);
     cel.classList.toggle('erro', !!(sld && sld.erro));
     cel.title = sld && sld.erro ? sld.erro : '';
+    const celUsd = document.querySelector(`[data-usd="${g.symbol}"]`);
+    if (celUsd) celUsd.textContent = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
     const sel = document.querySelector(`[data-rede="${g.symbol}"]`);
     if (sel) {
       if (sel.value !== id) sel.value = id;
@@ -242,6 +250,51 @@ function atualizarCelulas() {
   $('linha-vazia').classList.toggle('hidden', visiveis > 0);
 }
 
+function mostrarTotais() {
+  for (const el of document.querySelectorAll('[data-total]')) el.textContent = dolar(totais[el.dataset.total]);
+  $('total-carteira').textContent = totais[atual] != null ? dolar(totais[atual]) : '';
+}
+
+window.api.onResumo((lista) => {
+  for (const r of lista) if (r.totalUsd != null) totais[r.index] = r.totalUsd;
+  mostrarTotais();
+});
+
+// ---------- Busca de moeda em todas as carteiras ----------
+let buscaTimer = null;
+$('busca').oninput = () => {
+  clearTimeout(buscaTimer);
+  buscaTimer = setTimeout(buscar, 250);
+};
+$('busca').onkeydown = (e) => { if (e.key === 'Escape') { $('busca').value = ''; buscar(); } };
+
+async function buscar() {
+  const texto = $('busca').value.trim();
+  const box = $('busca-res');
+  if (!texto) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  let res = [];
+  try { res = await rpc('buscarMoeda', { texto }); } catch (e) { res = []; }
+  box.classList.remove('hidden');
+  if (!res.length) {
+    box.innerHTML = `<div class="cinza">Nenhuma carteira tem "${esc(texto)}".</div>`;
+    return;
+  }
+  box.innerHTML = res.map((r, i) => `
+    <div class="res" data-i="${i}">
+      <div class="li-topo"><b>${esc(r.carteira)}</b><span>${esc(dolar(r.usd))}</span></div>
+      <small>${esc(r.balance)} ${esc(r.symbol)} · ${esc(r.rede)}</small>
+    </div>`).join('');
+  for (const el of box.querySelectorAll('.res')) {
+    el.onclick = () => {
+      const r = res[Number(el.dataset.i)];
+      const g = grupos().find((x) => x.symbol === r.symbol);
+      redeEscolhida[r.symbol] = r.assetId;
+      if (g) escolhaManual.add(r.symbol);
+      selecionar(r.index);
+    };
+  }
+}
+
 window.api.onSaldos((d) => {
   if (d.index !== atual) return;
   for (const x of d.saldos) {
@@ -251,6 +304,7 @@ window.api.onSaldos((d) => {
   }
   atualizarCelulas();
   $('hora-saldo').textContent = 'Atualizado às ' + new Date(d.quando).toLocaleTimeString('pt-BR');
+  mostrarTotais();
 });
 
 $('btn-atualizar').onclick = () => rpc('monitorAgora').catch(() => {});

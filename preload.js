@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('api', {
     return r.data;
   },
   onUpdate: (fn) => ipcRenderer.on('update-event', (_e, data) => fn(data)),
-  onSaldos: (fn) => ipcRenderer.on('saldos', (_e, data) => fn(data))
+  onSaldos: (fn) => ipcRenderer.on('saldos', (_e, data) => fn(data)),
+  onResumo: (fn) => ipcRenderer.on('resumo', (_e, data) => fn(data))
 });

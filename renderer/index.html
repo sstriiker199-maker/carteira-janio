@@ -60,6 +60,10 @@
 <section id="tela-principal" class="tela hidden">
   <aside>
     <div class="logo"><img src="app-icon.png" alt=""> Wallet - Trabalho</div>
+    <div class="busca">
+      <input id="busca" placeholder="Buscar moeda (ex.: BNB)" spellcheck="false" autocomplete="off">
+      <div id="busca-res" class="hidden"></div>
+    </div>
     <ul id="lista-carteiras"></ul>
     <button id="btn-nova" class="primario largo">+ Nova carteira</button>
     <div class="rodape-lateral">
@@ -72,7 +76,7 @@
   <main>
     <header>
       <div>
-        <h2 id="nome-carteira"></h2>
+        <h2><span id="nome-carteira"></span> <span id="total-carteira" class="total"></span></h2>
         <div class="enderecos">
           <div><span class="rot">Ethereum / BNB / Polygon / Avalanche:</span> <code id="end-evm"></code> <button class="mini" data-copiar="end-evm">Copiar</button></div>
           <div><span class="rot">Tron:</span> <code id="end-tron"></code> <button class="mini" data-copiar="end-tron">Copiar</button></div>

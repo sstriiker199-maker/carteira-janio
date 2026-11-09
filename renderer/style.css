@@ -101,3 +101,15 @@ td.botoes button { margin-left: 6px; }
 .secao { border-top: 1px solid #2b303c; margin-top: 14px; padding-top: 14px; }
 .secao h3 { margin: 0 0 10px; font-size: 15px; }
 .ajuda { color: #9aa1b1; font-size: 12px; margin: -6px 0 12px; }
+
+.li-topo { display: flex; justify-content: space-between; gap: 6px; }
+.li-total { color: #6ee7a0; font-size: 12px; white-space: nowrap; }
+.total { color: #6ee7a0; font-size: 16px; font-weight: 500; margin-left: 8px; }
+td.saldo .usd { color: #7d8496; font-size: 12px; margin-top: 2px; }
+.busca { position: relative; margin-bottom: 10px; }
+.busca input { margin-bottom: 0; }
+#busca-res { position: absolute; left: 0; right: 0; top: 42px; background: #1f232d; border: 1px solid #343a48; border-radius: 8px; padding: 6px; z-index: 5; max-height: 360px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+#busca-res .res { padding: 8px; border-radius: 6px; cursor: pointer; }
+#busca-res .res:hover { background: #2a3040; }
+#busca-res small { color: #9aa1b1; }
+#busca-res .cinza { padding: 8px; }
