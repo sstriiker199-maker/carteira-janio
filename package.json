@@ -1,6 +1,6 @@
 {
   "name": "carteira-janio",
-  "productName": "Carteira Janio",
+  "productName": "Wallet - Trabalho",
   "version": "0.1.1",
   "description": "Carteira de criptomoedas com várias carteiras (Etapa 1: Ethereum, BNB Chain, Polygon, Avalanche, Tron)",
   "author": "Janio",
@@ -12,21 +12,24 @@
   },
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win --publish never"
+    "dist": "electron-builder --win --publish never",
+    "postinstall": "node scripts/copiar-icones.js"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",
     "ethers": "^6.13.0",
     "qrcode": "^1.5.4",
-    "tronweb": "^6.0.0"
+    "tronweb": "^6.0.0",
+    "nodemailer": "^6.9.16"
   },
   "devDependencies": {
     "electron": "^37.0.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.0.0",
+    "cryptocurrency-icons": "^0.18.1"
   },
   "build": {
     "appId": "com.janio.carteira",
-    "productName": "Carteira Janio",
+    "productName": "Wallet - Trabalho",
     "files": [
       "main.js",
       "preload.js",
@@ -36,13 +39,14 @@
     ],
     "win": {
       "target": "nsis",
-      "artifactName": "Carteira-Janio-Setup-${version}.${ext}"
+      "artifactName": "Wallet-Trabalho-Setup-${version}.${ext}",
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Carteira Janio"
+      "shortcutName": "Wallet - Trabalho"
     },
     "publish": [
       {
@@ -51,6 +55,9 @@
         "repo": "carteira-janio",
         "releaseType": "draft"
       }
-    ]
+    ],
+    "directories": {
+      "buildResources": "build"
+    }
   }
 }

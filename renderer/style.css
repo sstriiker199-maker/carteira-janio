@@ -90,3 +90,14 @@ td.botoes button { margin-left: 6px; }
 .barra div { height: 100%; background: #3b6cf6; transition: width .3s; }
 .notas { white-space: pre-wrap; background: #232733; border-radius: 8px; padding: 10px; max-height: 200px; overflow-y: auto; color: #c9cfdb; }
 #aviso { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #2b3245; padding: 10px 18px; border-radius: 8px; z-index: 20; }
+
+.logo { display: flex; align-items: center; gap: 8px; }
+.logo img { width: 28px; height: 28px; }
+.nome-moeda { display: flex; align-items: center; gap: 8px; }
+.icone { width: 28px; height: 28px; border-radius: 50%; flex: none; }
+.icone.letra { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; }
+.sel-rede { width: auto; min-width: 210px; margin: 0; padding: 6px 8px; }
+.barra-filtro { display: flex; justify-content: space-between; align-items: center; }
+.secao { border-top: 1px solid #2b303c; margin-top: 14px; padding-top: 14px; }
+.secao h3 { margin: 0 0 10px; font-size: 15px; }
+.ajuda { color: #9aa1b1; font-size: 12px; margin: -6px 0 12px; }

@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron');
+const alertas = require('./src/alertas');
 const path = require('path');
 const fs = require('fs');
 const { Mnemonic, HDNodeWallet, randomBytes } = require('ethers');
@@ -11,6 +12,9 @@ const { tronFromEvm } = require('./src/tronaddr');
 const evm = require('./src/evm');
 const tron = require('./src/tron');
 const updater = require('./src/updater');
+
+// Mantém os dados na mesma pasta de sempre, mesmo com o nome novo do programa
+app.setPath('userData', path.join(app.getPath('appData'), 'Carteira Janio'));
 
 let win = null;
 let session = null; // { phrase } enquanto desbloqueado
@@ -48,7 +52,18 @@ function settings() {
   const s = readJson(cfgFile()) || {};
   const rpc = {};
   for (const id of Object.keys(NETWORKS)) rpc[id] = (s.rpc && s.rpc[id]) || NETWORKS[id].rpc;
-  return { rpc, tronApiKey: s.tronApiKey || '' };
+  const n = s.notificar || {};
+  const e = s.email || {};
+  return {
+    rpc,
+    tronApiKey: s.tronApiKey || '',
+    intervalo: Math.max(3, Number(s.intervalo) || 3),
+    notificar: { entradas: n.entradas !== false, envios: n.envios !== false },
+    email: {
+      ativo: !!e.ativo, usuario: e.usuario || '', destino: e.destino || '',
+      entradas: e.entradas !== false, envios: e.envios !== false, senhaCifrada: e.senhaCifrada || ''
+    }
+  };
 }
 
 // ---------- Chaves ----------
@@ -131,6 +146,7 @@ handle('unlock', ({ password }) => {
 
 handle('lock', () => {
   session = null;
+  foco = null;
   for (const k of Object.keys(keyCache)) delete keyCache[k];
   return true;
 });
@@ -164,17 +180,122 @@ handle('renameWallet', ({ index, name }) => {
   return true;
 });
 
-handle('assets', () => ASSETS.map((a) => ({ ...a, networkName: NETWORKS[a.network].name, standard: NETWORKS[a.network].standard })));
+handle('assets', () => ASSETS.map((a) => ({ ...a, networkName: NETWORKS[a.network].name, standard: NETWORKS[a.network].standard, rotulo: NETWORKS[a.network].rotulo })));
 
-handle('balance', async ({ index, assetId }) => {
+async function fetchBalance(index, assetId) {
   const { asset, net } = getAsset(assetId);
   const s = settings();
   const address = addressFor(index, net.id);
-  const r = net.kind === 'tron'
-    ? await tron.balance({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, address)
-    : await evm.balance(net, s.rpc[net.id], asset, address);
+  return net.kind === 'tron'
+    ? tron.balance({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, address)
+    : evm.balance(net, s.rpc[net.id], asset, address);
+}
+
+handle('balance', async ({ index, assetId }) => {
+  const r = await fetchBalance(index, assetId);
   return { assetId, balance: fmt(r.raw, r.decimals), zero: r.raw === 0n };
 });
+
+// ---------- Monitor: atualiza saldos sozinho e avisa quando chega dinheiro ----------
+const saldosFile = () => path.join(dataDir(), 'saldos.json');
+let ultimos = null;
+let foco = null;
+let ultimoGeral = 0;
+let timerMonitor = null;
+let rodando = false;
+let pedirDeNovo = false;
+
+async function mapLimit(items, n, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (i < items.length) { const k = i++; out[k] = await fn(items[k]); }
+  }));
+  return out;
+}
+
+function abrirJanela() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function avisarEntrada(w, assetId, diff, decimals) {
+  const { asset, net } = getAsset(assetId);
+  alertas.avisar({
+    cfg: settings(), tipo: 'entradas', log, aoClicar: abrirJanela,
+    titulo: `Chegou ${fmt(diff, decimals)} ${asset.symbol}`,
+    corpo: `Rede ${net.rotulo || net.name} · carteira ${w.name}`
+  });
+}
+
+async function verificarCarteira(w) {
+  const res = await mapLimit(ASSETS, 4, async (a) => {
+    try {
+      const r = await fetchBalance(w.index, a.id);
+      return { assetId: a.id, raw: r.raw, decimals: r.decimals };
+    } catch (e) {
+      return { assetId: a.id, erro: friendly(e) };
+    }
+  });
+  const lista = [];
+  for (const r of res) {
+    if (r.erro) { lista.push({ assetId: r.assetId, erro: r.erro }); continue; }
+    const k = `${w.index}|${r.assetId}`;
+    const antes = ultimos[k] != null ? BigInt(ultimos[k]) : null;
+    if (antes != null && r.raw > antes) avisarEntrada(w, r.assetId, r.raw - antes, r.decimals);
+    ultimos[k] = r.raw.toString();
+    lista.push({ assetId: r.assetId, balance: fmt(r.raw, r.decimals), zero: r.raw === 0n });
+  }
+  if (win && !win.isDestroyed()) win.webContents.send('saldos', { index: w.index, saldos: lista, quando: Date.now() });
+}
+
+async function cicloMonitor() {
+  clearTimeout(timerMonitor);
+  if (rodando) { pedirDeNovo = true; return; }
+  rodando = true;
+  try {
+    if (session) {
+      if (!ultimos) ultimos = readJson(saldosFile()) || {};
+      const data = readJson(dataFile());
+      const agora = Date.now();
+      const todas = agora - ultimoGeral > 60000;
+      if (todas) ultimoGeral = agora;
+      const lista = data.wallets
+        .filter((w) => todas || w.index === foco)
+        .sort((a, b) => (a.index === foco ? -1 : b.index === foco ? 1 : 0));
+      for (const w of lista) await verificarCarteira(w);
+      fs.writeFileSync(saldosFile(), JSON.stringify(ultimos));
+    }
+  } catch (e) {
+    log('[monitor] ' + (e && e.message));
+  }
+  rodando = false;
+  if (pedirDeNovo) { pedirDeNovo = false; return cicloMonitor(); }
+  timerMonitor = setTimeout(cicloMonitor, settings().intervalo * 1000);
+}
+
+handle('monitorFoco', ({ index }) => { foco = Number(index); cicloMonitor(); return true; });
+handle('monitorAgora', () => { cicloMonitor(); return true; });
+
+// Acompanha um envio até ser confirmado na rede
+async function acompanharEnvio(net, hash, texto, w) {
+  const cfgTron = { rpc: settings().rpc.tron, apiKey: settings().tronApiKey };
+  let res = 'pendente';
+  try {
+    res = net.kind === 'tron' ? await tron.waitConfirm(cfgTron, hash) : await evm.waitConfirm(net, settings().rpc[net.id], hash);
+  } catch (e) {
+    log('[acompanhar] ' + e.message);
+  }
+  const titulos = { ok: 'Envio confirmado ✓', falhou: 'Envio FALHOU na rede', pendente: 'Envio ainda não confirmado' };
+  alertas.avisar({
+    cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela,
+    titulo: titulos[res] || titulos.pendente,
+    corpo: `${texto} · carteira ${w.name}`
+  });
+  cicloMonitor();
+}
 
 handle('receive', async ({ index, assetId }) => {
   const { asset, net } = getAsset(assetId);
@@ -196,7 +317,7 @@ async function runTransfer(mode, { index, assetId, to, amount, max }) {
     const args = { net, url: s.rpc[net.id], asset, wallet: k.evm, to, amount, max };
     r = mode === 'send' ? await evm.send(args) : await evm.prepare(args);
   }
-  return {
+  const out = {
     amount: fmt(r.value, r.decimals, r.decimals),
     symbol: asset.symbol,
     fee: fmt(r.fee, r.feeDecimals),
@@ -207,6 +328,14 @@ async function runTransfer(mode, { index, assetId, to, amount, max }) {
     hash: r.hash || null,
     explorer: r.hash ? net.explorer + r.hash : null
   };
+  if (mode === 'send' && r.hash) {
+    const w = getWallet(readJson(dataFile()), index);
+    const texto = `${out.amount} ${asset.symbol} na rede ${net.rotulo || net.name}`;
+    alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Envio em processamento…', corpo: `${texto} · carteira ${w.name}` });
+    acompanharEnvio(net, r.hash, texto, w);
+    setTimeout(cicloMonitor, 1500);
+  }
+  return out;
 }
 
 handle('estimate', (arg) => runTransfer('estimate', arg));
@@ -224,16 +353,44 @@ handle('exportKey', ({ index, password }) => {
   return { evm: k.evm.privateKey, tron: k.tronPrivateKey };
 });
 
-handle('getSettings', () => ({ ...settings(), defaults: Object.fromEntries(Object.values(NETWORKS).map((n) => [n.id, n.rpc])), names: Object.fromEntries(Object.values(NETWORKS).map((n) => [n.id, n.name])) }));
+handle('getSettings', () => ({ ...settings(), email: { ...settings().email, senhaCifrada: undefined, temSenha: !!settings().email.senhaCifrada }, defaults: Object.fromEntries(Object.values(NETWORKS).map((n) => [n.id, n.rpc])), names: Object.fromEntries(Object.values(NETWORKS).map((n) => [n.id, n.name])) }));
 
-handle('saveSettings', ({ rpc, tronApiKey }) => {
+function montarEmail(email, anterior) {
+  email = email || {};
+  return {
+    ativo: !!email.ativo,
+    usuario: String(email.usuario || '').trim(),
+    destino: String(email.destino || '').trim(),
+    entradas: email.entradas !== false,
+    envios: email.envios !== false,
+    senhaCifrada: email.senha ? alertas.cifrar(String(email.senha).replace(/\s+/g, '')) : (anterior.senhaCifrada || '')
+  };
+}
+
+handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email }) => {
   const clean = {};
   for (const id of Object.keys(NETWORKS)) {
     const u = String((rpc && rpc[id]) || '').trim();
     if (u && !/^https:\/\//i.test(u)) throw new Error(`O servidor da rede ${NETWORKS[id].name} precisa começar com https://`);
     if (u && u !== NETWORKS[id].rpc) clean[id] = u;
   }
-  writeJson(cfgFile(), { rpc: clean, tronApiKey: String(tronApiKey || '').trim() });
+  const atual = settings();
+  const em = montarEmail(email, atual.email);
+  if (em.ativo && (!em.usuario || !em.senhaCifrada)) throw new Error('Para avisos por e-mail, preencha o Gmail e a senha de app.');
+  writeJson(cfgFile(), {
+    rpc: clean,
+    tronApiKey: String(tronApiKey || '').trim(),
+    intervalo: Math.max(3, Number(intervalo) || 3),
+    notificar: { entradas: !(notificar && notificar.entradas === false), envios: !(notificar && notificar.envios === false) },
+    email: em
+  });
+  cicloMonitor();
+  return true;
+});
+
+handle('testarEmail', async ({ email }) => {
+  const em = montarEmail(email, settings().email);
+  await alertas.enviarEmail({ ...em, senha: alertas.decifrar(em.senhaCifrada) }, '[Wallet - Trabalho] E-mail de teste', 'Se você recebeu este e-mail, os avisos da Wallet - Trabalho estão funcionando.');
   return true;
 });
 
@@ -252,7 +409,8 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#14161c',
-    title: 'Carteira Janio',
+    title: 'Wallet - Trabalho',
+    icon: path.join(__dirname, 'renderer', 'app-icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -278,6 +436,8 @@ function createWindow() {
   updater.init(win);
 }
 
+app.setAppUserModelId('com.janio.carteira');
+
 app.whenReady().then(() => {
   createWindow();
   // Modo de teste automático (usado só pelo GitHub): abre, espera e fecha
@@ -300,7 +460,15 @@ app.whenReady().then(() => {
           await new Promise(r => setTimeout(r, 3000));
           await t('estimar usdt-tron', () => c('estimate', { index: 0, assetId: 'usdt-tron', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount: '1' }));
           await t('endereco errado', () => c('estimate', { index: 0, assetId: 'usdt-bsc', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount: '1' }));
-          await t('config', () => c('getSettings'));
+          await t('config', async () => (await c('getSettings')).intervalo);
+          await abrirPrincipal();
+          await new Promise(r => setTimeout(r, 12000));
+          out.push('linhas ' + document.querySelectorAll('#tabela-moedas tr[data-grupo]').length);
+          out.push('seletores ' + [...document.querySelectorAll('.sel-rede')].map(x => x.dataset.rede + ':' + x.options.length).join(' '));
+          out.push('icones ' + [...document.querySelectorAll('img.icone')].filter(i => i.naturalWidth > 0).map(i => i.dataset.icone).join(','));
+          out.push('letras ' + [...document.querySelectorAll('.icone.letra')].map(i => i.textContent).join(','));
+          out.push('saldos ' + [...document.querySelectorAll('[data-saldo]')].map(x => x.dataset.saldo + '=' + x.textContent).join(' | '));
+          out.push('hora ' + document.getElementById('hora-saldo').textContent);
           return out;
         })()`);
         for (const x of r) log('[teste] ' + x.slice(0, 300));

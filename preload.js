@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('api', {
     if (!r.ok) throw new Error(r.error);
     return r.data;
   },
-  onUpdate: (fn) => ipcRenderer.on('update-event', (_e, data) => fn(data))
+  onUpdate: (fn) => ipcRenderer.on('update-event', (_e, data) => fn(data)),
+  onSaldos: (fn) => ipcRenderer.on('saldos', (_e, data) => fn(data))
 });

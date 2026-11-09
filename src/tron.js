@@ -117,4 +117,18 @@ async function send({ cfg, asset, from, privateKey, to, amount, max }) {
   return { hash: res.txid || signed.txID, ...prep };
 }
 
-module.exports = { balance, prepare, send };
+async function waitConfirm(cfg, txid) {
+  const t = client(cfg);
+  for (let i = 0; i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    let info;
+    try { info = await retry(() => t.trx.getTransactionInfo(txid)); } catch { continue; }
+    if (info && info.blockNumber) {
+      const res = info.receipt && info.receipt.result;
+      return !res || res === 'SUCCESS' ? 'ok' : 'falhou';
+    }
+  }
+  return 'pendente';
+}
+
+module.exports = { balance, prepare, send, waitConfirm };

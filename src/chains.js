@@ -3,27 +3,27 @@
 
 const NETWORKS = {
   ethereum: {
-    id: 'ethereum', name: 'Ethereum', kind: 'evm', chainId: 1, symbol: 'ETH',
+    id: 'ethereum', rotulo: 'Ethereum (ERC-20)', name: 'Ethereum', kind: 'evm', chainId: 1, symbol: 'ETH',
     standard: 'ERC-20', rpc: 'https://ethereum-rpc.publicnode.com',
     explorer: 'https://etherscan.io/tx/', minPriorityGwei: 0.05
   },
   bsc: {
-    id: 'bsc', name: 'BNB Chain', kind: 'evm', chainId: 56, symbol: 'BNB',
+    id: 'bsc', rotulo: 'BNB Chain (BEP-20)', name: 'BNB Chain', kind: 'evm', chainId: 56, symbol: 'BNB',
     standard: 'BEP-20', rpc: 'https://bsc-rpc.publicnode.com',
     explorer: 'https://bscscan.com/tx/', minPriorityGwei: 0.1
   },
   polygon: {
-    id: 'polygon', name: 'Polygon', kind: 'evm', chainId: 137, symbol: 'POL',
+    id: 'polygon', rotulo: 'Polygon', name: 'Polygon', kind: 'evm', chainId: 137, symbol: 'POL',
     standard: 'Polygon (ERC-20)', rpc: 'https://polygon-bor-rpc.publicnode.com',
     explorer: 'https://polygonscan.com/tx/', minPriorityGwei: 30
   },
   avalanche: {
-    id: 'avalanche', name: 'Avalanche C-Chain', kind: 'evm', chainId: 43114, symbol: 'AVAX',
+    id: 'avalanche', rotulo: 'Avalanche C-Chain', name: 'Avalanche C-Chain', kind: 'evm', chainId: 43114, symbol: 'AVAX',
     standard: 'Avalanche C-Chain', rpc: 'https://avalanche-c-chain-rpc.publicnode.com',
     explorer: 'https://snowtrace.io/tx/', minPriorityGwei: 0
   },
   tron: {
-    id: 'tron', name: 'Tron', kind: 'tron', symbol: 'TRX',
+    id: 'tron', rotulo: 'Tron (TRC-20)', name: 'Tron', kind: 'tron', symbol: 'TRX',
     standard: 'TRC-20', rpc: 'https://api.trongrid.io',
     explorer: 'https://tronscan.org/#/transaction/'
   }

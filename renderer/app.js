@@ -8,7 +8,6 @@ let carteiras = [];
 let atual = null; // índice da carteira aberta
 let moedas = [];
 let saldos = {}; // assetId -> { balance, zero, erro }
-let carregando = 0;
 
 function mostrar(tela) {
   for (const t of document.querySelectorAll('.tela')) t.classList.add('hidden');
@@ -133,55 +132,129 @@ function selecionar(index) {
   $('end-evm').textContent = c.evmAddress;
   $('end-tron').textContent = c.tronAddress;
   saldos = {};
+  $('hora-saldo').textContent = '';
   desenharTabela();
-  atualizarSaldos();
+  rpc('monitorFoco', { index }).catch(() => {});
+}
+
+// ---------- Tabela: uma linha por moeda, com escolha da rede ----------
+const ICONES = { POL: 'matic' };
+const CORES = { LBLOCK: '#d4a017', PEPE: '#3d9a3d' };
+let redeEscolhida = {}; // símbolo -> assetId escolhido
+const escolhaManual = new Set();
+
+function grupos() {
+  const g = [];
+  for (const m of moedas) {
+    let x = g.find((y) => y.symbol === m.symbol);
+    if (!x) { x = { symbol: m.symbol, name: m.name, itens: [] }; g.push(x); }
+    x.itens.push(m);
+  }
+  return g;
+}
+
+function valorNum(sld) {
+  if (!sld || sld.erro || sld.zero) return 0;
+  if (String(sld.balance).startsWith('<')) return 1e-12;
+  return parseFloat(sld.balance) || 0;
+}
+
+function escolhida(g) {
+  if (!escolhaManual.has(g.symbol)) {
+    let melhor = redeEscolhida[g.symbol] || g.itens[0].id;
+    let max = valorNum(saldos[melhor]);
+    for (const m of g.itens) { const v = valorNum(saldos[m.id]); if (v > max) { max = v; melhor = m.id; } }
+    redeEscolhida[g.symbol] = melhor;
+  }
+  return redeEscolhida[g.symbol] || g.itens[0].id;
+}
+
+function textoSaldo(sld, simbolo) {
+  if (!sld) return 'carregando…';
+  if (sld.erro) return 'erro';
+  return `${sld.balance} ${simbolo}`;
 }
 
 function desenharTabela() {
-  const so = $('so-com-saldo').checked;
-  const linhas = moedas.filter((m) => !so || (saldos[m.id] && !saldos[m.id].zero && !saldos[m.id].erro));
-  $('tabela-moedas').innerHTML = linhas.map((m) => {
-    const s = saldos[m.id];
-    let saldo = '<span class="cinza">carregando…</span>';
-    if (s && s.erro) saldo = `<span class="erro" title="${esc(s.erro)}">erro ⓘ</span>`;
-    else if (s) saldo = `${esc(s.balance)} ${esc(m.symbol)}`;
-    return `<tr>
-      <td class="nome-moeda"><b>${esc(m.symbol)}</b><span>${esc(m.name)}</span></td>
-      <td><span class="tag">${esc(m.networkName)}${m.native ? '' : ' · ' + esc(m.standard)}</span></td>
-      <td class="saldo">${saldo}</td>
-      <td class="botoes">
-        <button data-receber="${m.id}">Receber</button>
-        <button data-enviar="${m.id}" class="primario">Enviar</button>
+  const gs = grupos();
+  $('tabela-moedas').innerHTML = gs.map((g) => `
+    <tr data-grupo="${esc(g.symbol)}">
+      <td class="nome-moeda">
+        <img class="icone" data-icone="${esc(g.symbol)}" src="icons/${esc((ICONES[g.symbol] || g.symbol).toLowerCase())}.svg" alt="">
+        <b>${esc(g.symbol)}</b><span>${esc(g.name)}</span>
       </td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="4" class="cinza">Nenhuma moeda com saldo nesta carteira.</td></tr>';
-  for (const b of document.querySelectorAll('[data-receber]')) b.onclick = () => receber(b.dataset.receber);
-  for (const b of document.querySelectorAll('[data-enviar]')) b.onclick = () => enviar(b.dataset.enviar);
-}
+      <td>${g.itens.length > 1
+        ? `<select class="sel-rede" data-rede="${esc(g.symbol)}">${g.itens.map((m) => `<option value="${m.id}">${esc(m.rotulo)}</option>`).join('')}</select>`
+        : `<span class="tag">${esc(g.itens[0].rotulo || g.itens[0].networkName)}</span>`}</td>
+      <td class="saldo" data-saldo="${esc(g.symbol)}"></td>
+      <td class="botoes">
+        <button data-receber-g="${esc(g.symbol)}">Receber</button>
+        <button data-enviar-g="${esc(g.symbol)}" class="primario">Enviar</button>
+      </td>
+    </tr>`).join('') + '<tr id="linha-vazia" class="hidden"><td colspan="4" class="cinza">Nenhuma moeda com saldo nesta carteira.</td></tr>';
 
-async function atualizarSaldos() {
-  const minhaVez = ++carregando;
-  const indice = atual;
-  saldos = {};
-  desenharTabela();
-  const fila = [...moedas];
-  async function trabalhador() {
-    while (fila.length) {
-      const m = fila.shift();
-      try {
-        saldos[m.id] = await rpc('balance', { index: indice, assetId: m.id });
-      } catch (e) {
-        saldos[m.id] = { erro: e.message };
-      }
-      if (minhaVez !== carregando) return;
-      desenharTabela();
-    }
+  for (const img of document.querySelectorAll('img.icone')) {
+    img.addEventListener('error', () => {
+      const sim = img.dataset.icone;
+      const span = document.createElement('span');
+      span.className = 'icone letra';
+      span.textContent = sim.slice(0, 1);
+      span.style.background = CORES[sim] || '#4b5568';
+      img.replaceWith(span);
+    }, { once: true });
   }
-  await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
+  for (const sel of document.querySelectorAll('[data-rede]')) {
+    sel.onchange = () => { redeEscolhida[sel.dataset.rede] = sel.value; escolhaManual.add(sel.dataset.rede); atualizarCelulas(); };
+  }
+  const grupoDe = (sim) => gs.find((g) => g.symbol === sim);
+  for (const b of document.querySelectorAll('[data-receber-g]')) b.onclick = () => receber(escolhida(grupoDe(b.dataset.receberG)));
+  for (const b of document.querySelectorAll('[data-enviar-g]')) b.onclick = () => enviar(escolhida(grupoDe(b.dataset.enviarG)));
+  atualizarCelulas();
 }
 
-$('btn-atualizar').onclick = () => atualizarSaldos();
-$('so-com-saldo').onchange = () => desenharTabela();
+function atualizarCelulas() {
+  const so = $('so-com-saldo').checked;
+  let visiveis = 0;
+  for (const g of grupos()) {
+    const id = escolhida(g);
+    const sld = saldos[id];
+    const cel = document.querySelector(`[data-saldo="${g.symbol}"]`);
+    if (!cel) continue;
+    cel.textContent = textoSaldo(sld, g.symbol);
+    cel.classList.toggle('cinza', !sld);
+    cel.classList.toggle('erro', !!(sld && sld.erro));
+    cel.title = sld && sld.erro ? sld.erro : '';
+    const sel = document.querySelector(`[data-rede="${g.symbol}"]`);
+    if (sel) {
+      if (sel.value !== id) sel.value = id;
+      for (const op of sel.options) {
+        const m = g.itens.find((x) => x.id === op.value);
+        const s2 = saldos[op.value];
+        op.textContent = s2 && !s2.erro && !s2.zero ? `${m.rotulo} — ${s2.balance}` : m.rotulo;
+      }
+    }
+    const temSaldo = g.itens.some((m) => valorNum(saldos[m.id]) > 0);
+    const linha = document.querySelector(`tr[data-grupo="${g.symbol}"]`);
+    const mostrar = !so || temSaldo;
+    linha.classList.toggle('hidden', !mostrar);
+    if (mostrar) visiveis++;
+  }
+  $('linha-vazia').classList.toggle('hidden', visiveis > 0);
+}
+
+window.api.onSaldos((d) => {
+  if (d.index !== atual) return;
+  for (const x of d.saldos) {
+    const antes = saldos[x.assetId];
+    // num erro passageiro, mantém o último saldo bom
+    saldos[x.assetId] = x.erro && antes && !antes.erro ? antes : x;
+  }
+  atualizarCelulas();
+  $('hora-saldo').textContent = 'Atualizado às ' + new Date(d.quando).toLocaleTimeString('pt-BR');
+});
+
+$('btn-atualizar').onclick = () => rpc('monitorAgora').catch(() => {});
+$('so-com-saldo').onchange = () => atualizarCelulas();
 
 for (const b of document.querySelectorAll('[data-copiar]')) {
   b.onclick = async () => { await rpc('copy', { text: $(b.dataset.copiar).textContent }); aviso('Endereço copiado'); };
@@ -344,7 +417,7 @@ function enviar(assetId) {
         <p class="sub">A rede pode levar de alguns segundos a alguns minutos para confirmar. Depois clique em "Atualizar saldos".</p>
         <div class="linha"><button id="m-explorer">Ver no explorador</button><button id="m-fechar" class="primario">Fechar</button></div>`);
       $('m-explorer').onclick = () => rpc('openExternal', { url: r.explorer });
-      $('m-fechar').onclick = () => { fecharModal(); atualizarSaldos(); };
+      $('m-fechar').onclick = () => { fecharModal(); rpc('monitorAgora').catch(() => {}); };
     } catch (e) {
       $('e-erro').textContent = e.message;
       btn.disabled = false;
@@ -400,26 +473,78 @@ $('btn-bloquear').onclick = async () => {
 // ---------- Configurações ----------
 $('btn-config').onclick = async () => {
   const s = await rpc('getSettings');
+  const chk = (id, v, txt) => `<label class="check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> ${txt}</label>`;
   abrirModal(`
     <h2>Configurações</h2>
-    <p class="sub">Servidores usados para consultar saldo e enviar. Deixe como está se tudo estiver funcionando.</p>
-    ${Object.keys(s.rpc).map((id) => `
-      <label>${esc(s.names[id])}</label>
-      <input data-rpc="${id}" value="${esc(s.rpc[id])}" placeholder="${esc(s.defaults[id])}" spellcheck="false">`).join('')}
-    <label>Chave da TronGrid (opcional, evita bloqueio por excesso de consultas)</label>
-    <input id="c-tronkey" value="${esc(s.tronApiKey)}" spellcheck="false">
+
+    <h3>Atualização dos saldos</h3>
+    <label>Atualizar a carteira aberta a cada</label>
+    <select id="c-intervalo">${[3, 5, 10, 30, 60].map((n) => `<option value="${n}" ${s.intervalo === n ? 'selected' : ''}>${n} segundos</option>`).join('')}</select>
+    <p class="ajuda">As outras carteiras são conferidas a cada 1 minuto (para avisar quando chegar dinheiro).</p>
+
+    <div class="secao">
+      <h3>Notificações no computador</h3>
+      ${chk('c-not-entradas', s.notificar.entradas, 'Avisar quando chegar moeda')}
+      ${chk('c-not-envios', s.notificar.envios, 'Avisar sobre meus envios (processando / confirmado)')}
+    </div>
+
+    <div class="secao">
+      <h3>Avisos por e-mail (Gmail)</h3>
+      ${chk('c-email-ativo', s.email.ativo, 'Enviar avisos por e-mail')}
+      <label>Seu Gmail (que vai enviar)</label>
+      <input id="c-email-usuario" value="${esc(s.email.usuario)}" placeholder="voce@gmail.com" spellcheck="false">
+      <label>Senha de app do Gmail ${s.email.temSenha ? '(já salva — deixe vazio para manter)' : ''}</label>
+      <input id="c-email-senha" type="password" placeholder="16 letras, ex.: abcd efgh ijkl mnop">
+      <p class="ajuda">Não é a senha normal. Crie em <b>myaccount.google.com/apppasswords</b> (precisa da verificação em duas etapas ligada).</p>
+      <label>Mandar os avisos para (vazio = o mesmo Gmail)</label>
+      <input id="c-email-destino" value="${esc(s.email.destino)}" spellcheck="false">
+      ${chk('c-email-entradas', s.email.entradas, 'E-mail quando chegar moeda')}
+      ${chk('c-email-envios', s.email.envios, 'E-mail sobre meus envios')}
+      <button id="c-email-teste">Enviar e-mail de teste</button> <span id="c-email-res" class="cinza"></span>
+    </div>
+
+    <div class="secao">
+      <h3>Servidores das redes</h3>
+      <p class="ajuda">Deixe como está se tudo estiver funcionando.</p>
+      ${Object.keys(s.rpc).map((id) => `
+        <label>${esc(s.names[id])}</label>
+        <input data-rpc="${id}" value="${esc(s.rpc[id])}" placeholder="${esc(s.defaults[id])}" spellcheck="false">`).join('')}
+      <label>Chave da TronGrid (opcional, evita bloqueio por excesso de consultas)</label>
+      <input id="c-tronkey" value="${esc(s.tronApiKey)}" spellcheck="false">
+      <button id="c-padrao">Restaurar servidores padrão</button>
+    </div>
+
     <p id="m-erro" class="erro"></p>
-    <div class="linha"><button id="c-padrao">Restaurar padrão</button><button id="m-fechar">Cancelar</button><button id="m-ok" class="primario">Salvar</button></div>`);
+    <div class="linha"><button id="m-fechar">Cancelar</button><button id="m-ok" class="primario">Salvar</button></div>`);
+
+  const emailForm = () => ({
+    ativo: $('c-email-ativo').checked,
+    usuario: $('c-email-usuario').value,
+    senha: $('c-email-senha').value,
+    destino: $('c-email-destino').value,
+    entradas: $('c-email-entradas').checked,
+    envios: $('c-email-envios').checked
+  });
   $('m-fechar').onclick = fecharModal;
   $('c-padrao').onclick = () => { for (const i of document.querySelectorAll('[data-rpc]')) i.value = s.defaults[i.dataset.rpc]; };
+  $('c-email-teste').onclick = async () => {
+    $('c-email-res').textContent = 'Enviando…';
+    try { await rpc('testarEmail', { email: emailForm() }); $('c-email-res').textContent = 'Enviado ✓ confira sua caixa de entrada'; }
+    catch (e) { $('c-email-res').textContent = e.message; }
+  };
   $('m-ok').onclick = async () => {
     const servidores = {};
     for (const i of document.querySelectorAll('[data-rpc]')) servidores[i.dataset.rpc] = i.value;
     try {
-      await rpc('saveSettings', { rpc: servidores, tronApiKey: $('c-tronkey').value });
+      await rpc('saveSettings', {
+        rpc: servidores,
+        tronApiKey: $('c-tronkey').value,
+        intervalo: Number($('c-intervalo').value),
+        notificar: { entradas: $('c-not-entradas').checked, envios: $('c-not-envios').checked },
+        email: emailForm()
+      });
       fecharModal();
       aviso('Configurações salvas');
-      atualizarSaldos();
     } catch (e) { $('m-erro').textContent = e.message; }
   };
 };
@@ -444,7 +569,7 @@ function desenharUpd() {
       ${upd.notas ? `<label>O que mudou</label><div class="notas">${esc(upd.notas)}</div>` : ''}
       <button id="u-baixar" class="primario largo">Baixar atualização</button>`;
   } else if (upd.status === 'baixando') {
-    corpo = `<p>Baixando versão ${esc(upd.versaoNova || '')}… ${upd.progresso}%</p><div class="barra"><div style="width:${upd.progresso}%"></div></div>`;
+    corpo = `<p>Baixando versão ${esc(upd.versaoNova || '')}… ${upd.progresso}%</p><div class="barra"><div id="u-barra"></div></div>`;
   } else if (upd.status === 'pronto') {
     corpo = `<p class="ok">Versão ${esc(upd.versaoNova)} baixada ✓</p>
       <p class="sub">O aplicativo vai fechar, instalar e abrir de novo. Suas carteiras não são afetadas.</p>
@@ -455,6 +580,7 @@ function desenharUpd() {
     corpo = '<p class="sub">Clique em "Procurar atualizações".</p>';
   }
   $('u-corpo').innerHTML = corpo;
+  if ($('u-barra')) $('u-barra').style.width = upd.progresso + '%';
   if ($('u-baixar')) $('u-baixar').onclick = () => rpc('updDownload').catch((e) => aviso(e.message));
   if ($('u-instalar')) $('u-instalar').onclick = () => rpc('updInstall').catch((e) => aviso(e.message));
 }

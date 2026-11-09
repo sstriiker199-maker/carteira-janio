@@ -96,4 +96,10 @@ async function send(args) {
   return { hash: resp.hash, ...prep };
 }
 
-module.exports = { balance, prepare, send, isAddress };
+async function waitConfirm(net, url, hash) {
+  const receipt = await provider(net, url).waitForTransaction(hash, 1, 10 * 60 * 1000);
+  if (!receipt) return 'pendente';
+  return receipt.status === 1 ? 'ok' : 'falhou';
+}
+
+module.exports = { balance, prepare, send, waitConfirm, isAddress };
