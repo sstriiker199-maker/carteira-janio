@@ -1,22 +1,14 @@
-# Carteira Janio
+# Wallet - Trabalho
 
 Aplicativo de Windows para criar várias carteiras de criptomoedas (ex.: "Janio 1", "Janio 2"), receber e enviar.
 
-**Etapa 1 – redes e moedas:**
+**Moedas:** BTC, ETH, ADA, BCH, LTC, DOGE, XRP, USDT (Tron, BNB, Ethereum, Polygon), BNB, TRX, USDC (Ethereum, BNB, Polygon, Tron), Lucky Block V2, SOL, AVAX, POL, SHIB, PEPE, BONK e TON.
 
-| Rede | Moedas |
-|---|---|
-| Ethereum | ETH, USDT, USDC, SHIB, PEPE, Lucky Block (V2) |
-| BNB Chain (BEP-20) | BNB, USDT, USDC |
-| Polygon | POL (antigo MATIC), USDT, USDC |
-| Avalanche C-Chain | AVAX |
-| Tron (TRC-20) | TRX, USDT, USDC |
-
-Próximas etapas: Bitcoin, Litecoin, Dogecoin, Bitcoin Cash, Solana, BONK, XRP, Cardano e TON.
+**Funções:** várias carteiras numa frase só, importar carteira (MetaMask), saldos ao vivo com preço e variação 24h, total em dólar, busca de moeda, receber com QR Code, enviar com taxa Econômica/Normal/Rápida em dólar, verificação de endereço, carteira de taxas automática, envios múltiplos, juntar saldos, favoritos, troca (swap) via SideShift, aba Mercado, aba Atividade, notificações no Windows e por Gmail, atualização automática.
 
 ## Como instalar
 1. Abra a página **Releases** do repositório (menu à direita).
-2. Baixe o arquivo **Carteira-Janio-Setup-x.x.x.exe** e abra.
+2. Baixe o arquivo **Wallet-Trabalho-Setup-x.x.x.exe** e abra.
 3. Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações → Executar assim mesmo** (aparece porque o app não tem certificado pago de assinatura).
 
 ## Atualizações
@@ -24,7 +16,7 @@ No app, clique em **Atualizações** (barra lateral). Quando houver versão nova
 
 ## Segurança
 - A frase secreta de 12 palavras gera **todas** as carteiras. Anote em papel e guarde bem.
-- Ela fica salva só no seu PC, criptografada com a sua senha, em `%APPDATA%\Carteira Janio\carteiras.json`.
+- Ela fica salva só no seu PC, criptografada com a sua senha, em `%APPDATA%\Wallet - Trabalho\carteiras.json`.
 - A mesma frase pode ser importada na MetaMask (redes 0x…) ou Trust Wallet. As carteiras seguem o padrão: Janio 1 = conta 1, Janio 2 = conta 2…
 - **Teste com valores pequenos** antes de mover quantias grandes.
 
