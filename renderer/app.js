@@ -184,6 +184,7 @@ function escolhida(g) {
 
 function textoSaldo(sld, simbolo) {
   if (!sld) return 'carregando…';
+  if (sld.indisponivel) return '—';
   if (sld.erro) return 'erro';
   return `${sld.balance} ${simbolo}`;
 }
@@ -242,7 +243,7 @@ function atualizarCelulas() {
     cel.textContent = textoSaldo(sld, g.symbol);
     cel.classList.toggle('cinza', !sld);
     cel.classList.toggle('erro', !!(sld && sld.erro));
-    cel.title = sld && sld.erro ? sld.erro : '';
+    cel.title = sld && (sld.erro || sld.indisponivel) ? (sld.erro || sld.indisponivel) : '';
     const celUsd = document.querySelector(`[data-usd="${g.symbol}"]`);
     if (celUsd) {
       let t = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
@@ -425,7 +426,9 @@ function enviar(assetId) {
     <label>Enviar para (endereço ${tron ? 'Tron, começa com T' : '0x…'})</label>
     <input id="e-para" spellcheck="false" placeholder="${tron ? 'T…' : '0x…'}">
     ${outras.length ? `<label>…ou escolha uma das suas carteiras</label>
-    <select id="e-minhas"><option value="">— escolher —</option>${outras.map((c) => `<option value="${esc(tron ? c.tronAddress : c.evmAddress)}">${esc(c.name)}</option>`).join('')}</select>` : ''}
+    <select id="e-minhas"><option value="">— escolher —</option>${outras.map((c) => `<option value="${c.index}">${esc(c.name)}</option>`).join('')}</select>` : ''}
+    ${m.memo === 'tag' ? `<label>Tag de destino (número) — obrigatória se o destino for uma corretora</label><input id="e-memo" inputmode="numeric" placeholder="ex.: 123456">` : ''}
+    ${m.memo === 'comentario' ? `<label>Comentário / Memo — obrigatório se o destino for uma corretora</label><input id="e-memo" placeholder="ex.: 123456789">` : ''}
     <label>Quantidade de ${esc(m.symbol)}</label>
     <div class="campo-valor"><input id="e-valor" placeholder="0,00" inputmode="decimal"><button id="e-max">Máx</button></div>
     <p id="e-erro" class="erro"></p>
@@ -433,8 +436,13 @@ function enviar(assetId) {
     <div class="linha" id="e-botoes"><button id="e-cancelar">Cancelar</button><button id="e-calcular" class="primario">Revisar envio</button></div>`);
 
   const sel = $('e-minhas');
-  if (sel) sel.onchange = () => { if (sel.value) $('e-para').value = sel.value; limparResumo(); };
+  if (sel) sel.onchange = async () => {
+    if (sel.value === '') return;
+    try { $('e-para').value = (await rpc('receive', { index: Number(sel.value), assetId })).address; } catch (e) { $('e-erro').textContent = e.message; }
+    limparResumo();
+  };
   $('e-para').oninput = limparResumo;
+  if ($('e-memo')) $('e-memo').oninput = limparResumo;
   $('e-valor').oninput = () => { usarMax = false; $('e-max').classList.remove('primario'); limparResumo(); };
   $('e-max').onclick = () => {
     usarMax = !usarMax;
@@ -453,7 +461,7 @@ function enviar(assetId) {
   }
 
   let vel = 'normal';
-  const dados = () => ({ index: atual, assetId, to: $('e-para').value.trim(), amount: usarMax ? '' : $('e-valor').value, max: usarMax, velocidade: vel });
+  const dados = () => ({ index: atual, assetId, to: $('e-para').value.trim(), amount: usarMax ? '' : $('e-valor').value, max: usarMax, velocidade: vel, memo: $('e-memo') ? $('e-memo').value.trim() : undefined });
   const NOMES_VEL = { economica: 'Econômica', normal: 'Normal', rapida: 'Rápida' };
   const comUsd = (v, u) => `${esc(v)}${u != null ? ` <span class="cinza">(≈ ${esc(dolar(u))})</span>` : ''}`;
 
@@ -463,7 +471,9 @@ function enviar(assetId) {
     $('e-calcular').textContent = 'Calculando…';
     try {
       const r = await rpc('estimate', dados());
-      const destino = carteiras.find((c) => c.evmAddress.toLowerCase() === r.to.toLowerCase() || c.tronAddress === r.to);
+      const selMinha = $('e-minhas');
+      const destino = carteiras.find((c) => c.evmAddress.toLowerCase() === r.to.toLowerCase() || c.tronAddress === r.to)
+        || (selMinha && selMinha.value !== '' ? carteiras.find((c) => c.index === Number(selMinha.value)) : null);
       const velHtml = r.opcoes ? `<div class="velocidades">${Object.entries(r.opcoes).map(([v, o]) => `
           <label class="vel ${v === r.velocidade ? 'ativa' : ''}"><input type="radio" name="vel" value="${v}" ${v === r.velocidade ? 'checked' : ''}>
             <b>${NOMES_VEL[v]}</b><span>${esc(o.fee)} ${esc(r.feeSymbol)}</span><span class="cinza">${o.usd != null ? '≈ ' + esc(dolar(o.usd)) : ''}</span>
@@ -473,6 +483,7 @@ function enviar(assetId) {
         <div><span class="rot">Valor:</span> <b>${esc(r.amount)} ${esc(r.symbol)}</b>${r.amountUsd != null ? ` <span class="cinza">(≈ ${esc(dolar(r.amountUsd))})</span>` : ''}</div>
         <div><span class="rot">Rede:</span> ${esc(r.networkName)}</div>
         <div><span class="rot">Para:</span> <code>${esc(r.to)}</code>${destino ? ` <span class="tag">${esc(destino.name)}</span>` : ''}</div>
+        ${$('e-memo') && $('e-memo').value.trim() ? `<div><span class="rot">${m.memo === 'tag' ? 'Tag:' : 'Memo:'}</span> ${esc($('e-memo').value.trim())}</div>` : ''}
         <div><span class="rot">Taxa da rede:</span> ${esc(r.feeLabel)} ${comUsd(r.fee + ' ' + r.feeSymbol, r.feeUsd)}</div>
         ${velHtml}
         ${r.abastecer ? `<p class="alerta-rede">Esta carteira não tem ${esc(r.abastecer.simbolo)} para a taxa. Vou usar <b>${esc(r.abastecer.valor)} ${esc(r.abastecer.simbolo)}</b>${r.abastecer.usd != null ? ' (≈ ' + esc(dolar(r.abastecer.usd)) + ')' : ''} da carteira <b>${esc(r.abastecer.de)}</b> (+ taxa do abastecimento ${comUsd(r.abastecer.taxaAbastecer + ' ' + r.abastecer.simbolo, r.abastecer.taxaAbastecerUsd)}). Primeiro chega a taxa, depois o envio é feito.</p>` : ''}
@@ -585,7 +596,7 @@ async function carregarAtividade() {
     let detalhe = '';
     if (e.tipo === 'enviado') {
       titulo = `Enviado ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
-      detalhe = `De <b>${esc(e.carteira)}</b> para ${e.destino ? '<b>' + esc(e.destino) + '</b> ' : ''}<code>${esc(e.para)}</code><br>Rede ${esc(e.rede)} · taxa ${esc(e.taxa || '')}${e.taxaUsd != null ? ' (≈ ' + esc(dolar(e.taxaUsd)) + ')' : ''}`;
+      detalhe = `De <b>${esc(e.carteira)}</b> para ${e.destino ? '<b>' + esc(e.destino) + '</b> ' : ''}<code>${esc(e.para)}</code>${e.memo ? ' · memo/tag ' + esc(e.memo) : ''}<br>Rede ${esc(e.rede)} · taxa ${esc(e.taxa || '')}${e.taxaUsd != null ? ' (≈ ' + esc(dolar(e.taxaUsd)) + ')' : ''}`;
     } else if (e.tipo === 'recebido') {
       titulo = `Recebido ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
       detalhe = `Na carteira <b>${esc(e.carteira)}</b> · rede ${esc(e.rede)}`;

@@ -20,7 +20,16 @@
     "ethers": "^6.13.0",
     "qrcode": "^1.5.4",
     "tronweb": "^6.0.0",
-    "nodemailer": "^6.9.16"
+    "nodemailer": "^6.9.16",
+    "bitcoinjs-lib": "6.1.7",
+    "cashaddrjs": "^0.4.4",
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.9",
+    "xrpl": "^4.2.0",
+    "@ton/ton": "^15.1.0",
+    "@ton/core": "^0.60.0",
+    "@ton/crypto": "^3.3.0",
+    "@emurgo/cardano-serialization-lib-nodejs": "^12.1.1"
   },
   "devDependencies": {
     "electron": "^37.0.0",

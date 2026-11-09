@@ -13,6 +13,17 @@ const { tronFromEvm } = require('./src/tronaddr');
 const evm = require('./src/evm');
 const tron = require('./src/tron');
 const updater = require('./src/updater');
+const ed25519 = require('./src/ed25519');
+const { getBytes } = require('ethers');
+
+// Módulos das redes novas (carregados só quando usados)
+const MOD = {
+  utxo: () => require('./src/utxo'),
+  solana: () => require('./src/solana'),
+  xrp: () => require('./src/xrp'),
+  ton: () => require('./src/ton'),
+  cardano: () => require('./src/cardano')
+};
 
 // Mantém os dados na mesma pasta de sempre, mesmo com o nome novo do programa
 app.setPath('userData', path.join(app.getPath('appData'), 'Carteira Janio'));
@@ -87,7 +98,7 @@ function keysFor(index) {
       const pk = session.extras.chaves[w.chave];
       if (!pk) throw new Error('Chave da carteira importada não encontrada.');
       const evmWallet = new Wallet(pk);
-      keyCache[index] = { evm: evmWallet, tronPrivateKey: pk.replace(/^0x/, ''), tronAddress: tronFromEvm(evmWallet.address), soEvm: true };
+      keyCache[index] = { evm: evmWallet, tronPrivateKey: pk.replace(/^0x/, ''), tronAddress: tronFromEvm(evmWallet.address), soEvm: true, redes: {}, ends: {} };
     } else {
       const frase = w.origem === 'frase' ? session.extras.frases[w.grupo] : session.phrase;
       if (!frase) throw new Error('Frase da carteira importada não encontrada.');
@@ -95,7 +106,7 @@ function keysFor(index) {
       const m = Mnemonic.fromPhrase(frase);
       const evmWallet = HDNodeWallet.fromMnemonic(m, `m/44'/60'/0'/0/${d}`);
       const tronNode = HDNodeWallet.fromMnemonic(m, `m/44'/195'/0'/0/${d}`);
-      keyCache[index] = { evm: evmWallet, tronPrivateKey: tronNode.privateKey.slice(2), tronAddress: tronFromEvm(tronNode.address) };
+      keyCache[index] = { evm: evmWallet, tronPrivateKey: tronNode.privateKey.slice(2), tronAddress: tronFromEvm(tronNode.address), frase, d, redes: {}, ends: {} };
     }
   }
   return keyCache[index];
@@ -105,9 +116,50 @@ function salvarExtras(data) {
   data.extras = vault.encrypt(JSON.stringify(session.extras), session.senha);
 }
 
+class Indisponivel extends Error {}
+
+// Chave de uma carteira numa rede nova (Bitcoin, Solana, XRP, TON, Cardano…)
+function chaveRede(index, net) {
+  const k = keysFor(index);
+  if (k.redes[net.id]) return k.redes[net.id];
+  if (k.soEvm) throw new Indisponivel('Carteira importada por chave privada: só funciona em Ethereum, BNB, Polygon, Avalanche e Tron.');
+  const m = Mnemonic.fromPhrase(k.frase);
+  let chave;
+  if (net.kind === 'utxo' || net.kind === 'xrp') {
+    const caminho = net.kind === 'xrp' ? "m/44'/144'/0'/0/" : MOD.utxo().REDES[net.coin].caminho;
+    const w = HDNodeWallet.fromMnemonic(m, caminho + k.d);
+    chave = { priv: w.privateKey, pubkey: Buffer.from(getBytes(w.publicKey)) };
+  } else if (net.kind === 'solana') {
+    chave = { seed32: ed25519.derivar(m.computeSeed(), `m/44'/501'/${k.d}'/0'`) };
+  } else if (net.kind === 'ton') {
+    chave = { seed32: ed25519.derivar(m.computeSeed(), `m/44'/607'/${k.d}'`) };
+  } else if (net.kind === 'cardano') {
+    chave = { entropia: m.entropy, conta: k.d };
+  }
+  k.redes[net.id] = chave;
+  return chave;
+}
+
 function addressFor(index, networkId) {
   const k = keysFor(index);
-  return NETWORKS[networkId].kind === 'tron' ? k.tronAddress : k.evm.address;
+  const net = NETWORKS[networkId];
+  if (net.kind === 'tron') return k.tronAddress;
+  if (net.kind === 'evm') return k.evm.address;
+  if (!k.ends[networkId]) {
+    const chave = chaveRede(index, net);
+    k.ends[networkId] = net.kind === 'utxo' ? MOD.utxo().endereco(net.coin, chave.pubkey) : MOD[net.kind]().endereco(net.kind === 'solana' || net.kind === 'ton' ? chave.seed32 : chave);
+  }
+  return k.ends[networkId];
+}
+
+function cfgRede(net) {
+  const s = settings();
+  return { rpc: s.rpc[net.id], apiKey: net.kind === 'tron' ? s.tronApiKey : undefined };
+}
+
+function linkExplorer(net, hash) {
+  if (net.kind === 'ton') return net.explorer + String(hash).split(':')[0];
+  return net.explorer + hash;
 }
 
 function getWallet(data, index) {
@@ -247,15 +299,16 @@ handle('renameWallet', ({ index, name }) => {
   return true;
 });
 
-handle('assets', () => ASSETS.map((a) => ({ ...a, networkName: NETWORKS[a.network].name, standard: NETWORKS[a.network].standard, rotulo: NETWORKS[a.network].rotulo })));
+handle('assets', () => ASSETS.map((a) => ({ ...a, networkName: NETWORKS[a.network].name, standard: NETWORKS[a.network].standard, rotulo: NETWORKS[a.network].rotulo, memo: NETWORKS[a.network].memo || null, kind: NETWORKS[a.network].kind })));
 
 async function fetchBalance(index, assetId) {
   const { asset, net } = getAsset(assetId);
   const s = settings();
   const address = addressFor(index, net.id);
-  return net.kind === 'tron'
-    ? tron.balance({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, address)
-    : evm.balance(net, s.rpc[net.id], asset, address);
+  if (net.kind === 'tron') return tron.balance({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, address);
+  if (net.kind === 'evm') return evm.balance(net, s.rpc[net.id], asset, address);
+  if (net.kind === 'utxo') return MOD.utxo().saldo(cfgRede(net), net.coin, asset, address);
+  return MOD[net.kind]().saldo(cfgRede(net), asset, address);
 }
 
 handle('balance', async ({ index, assetId }) => {
@@ -354,17 +407,30 @@ function avisarEntrada(w, assetId, diff, decimals) {
   });
 }
 
+const ultimaConsulta = {}; // "índice|moeda" -> horário
+
 async function verificarCarteira(w) {
-  const res = await mapLimit(ASSETS, 4, async (a) => {
+  const agora = Date.now();
+  const res = await mapLimit(ASSETS, 5, async (a) => {
+    const net = NETWORKS[a.network];
+    const chave = `${w.index}|${a.id}`;
+    const guardado = saldosMem[w.index] && saldosMem[w.index][a.id];
+    // redes lentas/limitadas (Bitcoin, TON, Cardano…) são consultadas com menos frequência
+    if (net.lento && guardado && agora - (ultimaConsulta[chave] || 0) < net.lento) {
+      return { assetId: a.id, raw: guardado.raw, decimals: guardado.decimals, repetido: true };
+    }
     try {
       const r = await fetchBalance(w.index, a.id);
+      ultimaConsulta[chave] = agora;
       return { assetId: a.id, raw: r.raw, decimals: r.decimals };
     } catch (e) {
+      if (e instanceof Indisponivel) return { assetId: a.id, indisponivel: e.message };
       return { assetId: a.id, erro: friendly(e) };
     }
   });
   const lista = [];
   for (const r of res) {
+    if (r.indisponivel) { lista.push({ assetId: r.assetId, indisponivel: r.indisponivel, zero: true }); continue; }
     if (r.erro) { lista.push({ assetId: r.assetId, erro: r.erro }); continue; }
     const k = `${w.index}|${r.assetId}`;
     const antes = ultimos[k] != null ? BigInt(ultimos[k]) : null;
@@ -445,11 +511,10 @@ handle('buscarMoeda', ({ texto }) => {
 });
 
 // Acompanha um envio até ser confirmado na rede
-async function acompanharEnvio(net, hash, texto, w, idAtiv) {
-  const cfgTron = { rpc: settings().rpc.tron, apiKey: settings().tronApiKey };
+async function acompanharEnvio(net, hash, texto, w, idAtiv, index) {
   let res = 'pendente';
   try {
-    res = net.kind === 'tron' ? await tron.waitConfirm(cfgTron, hash) : await evm.waitConfirm(net, settings().rpc[net.id], hash);
+    res = await esperarConfirmacao(net, hash, index);
   } catch (e) {
     log('[acompanhar] ' + e.message);
   }
@@ -464,6 +529,7 @@ async function acompanharEnvio(net, hash, texto, w, idAtiv) {
 }
 
 handle('receive', async ({ index, assetId }) => {
+  requireUnlocked();
   const { asset, net } = getAsset(assetId);
   const address = addressFor(index, net.id);
   const qr = await QRCode.toDataURL(address, { margin: 1, width: 240 });
@@ -479,9 +545,14 @@ function nativoDe(net) {
   return ASSETS.find((a) => a.network === net.id && a.native);
 }
 
-async function prepararOuEnviar(mode, { index, asset, net, to, amount, max, velocidade, valorRaw }) {
+async function prepararOuEnviar(mode, { index, asset, net, to, amount, max, velocidade, valorRaw, memo }) {
   const s = settings();
   const k = keysFor(index);
+  if (net.kind !== 'evm' && net.kind !== 'tron') {
+    const mod = net.kind === 'utxo' ? MOD.utxo() : MOD[net.kind]();
+    const args = { cfg: cfgRede(net), coin: net.coin, asset, chave: chaveRede(index, net), to, amount, max, velocidade, valorRaw, memo };
+    return mode === 'send' ? mod.enviar(args) : mod.preparar(args);
+  }
   if (net.kind === 'tron') {
     const args = { cfg: { rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, from: k.tronAddress, privateKey: k.tronPrivateKey, to, amount, max, valorRaw };
     return mode === 'send' ? tron.send(args) : tron.prepare(args);
@@ -490,8 +561,11 @@ async function prepararOuEnviar(mode, { index, asset, net, to, amount, max, velo
   return mode === 'send' ? evm.send(args) : evm.prepare(args);
 }
 
-async function esperarConfirmacao(net, hash) {
+async function esperarConfirmacao(net, hash, index) {
   const s = settings();
+  if (net.kind === 'utxo') return MOD.utxo().confirmar(cfgRede(net), net.coin, hash);
+  if (net.kind === 'ton') return MOD.ton().confirmar(cfgRede(net), hash, chaveRede(index, net).seed32);
+  if (net.kind !== 'evm' && net.kind !== 'tron') return MOD[net.kind]().confirmar(cfgRede(net), hash);
   return net.kind === 'tron'
     ? tron.waitConfirm({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, hash)
     : evm.waitConfirm(net, s.rpc[net.id], hash);
@@ -513,12 +587,12 @@ async function planoTaxa(index, net, r) {
   return { tanque, valor, nat };
 }
 
-async function runTransfer(mode, { index, assetId, to, amount, max, velocidade }) {
+async function runTransfer(mode, { index, assetId, to, amount, max, velocidade, memo }) {
   requireUnlocked();
   await precos.atualizar().catch(() => {});
   const { asset, net } = getAsset(assetId);
   const w = getWallet(readJson(dataFile()), index);
-  const r = await prepararOuEnviar('estimate', { index, asset, net, to, amount, max, velocidade });
+  const r = await prepararOuEnviar('estimate', { index, asset, net, to, amount, max, velocidade, memo });
   const plano = await planoTaxa(index, net, r);
   const nat = nativoDe(net);
 
@@ -568,11 +642,11 @@ async function runTransfer(mode, { index, assetId, to, amount, max, velocidade }
     const idTaxa = registrar({
       tipo: 'taxa', index: plano.tanque.index, carteira: plano.tanque.name, indexDestino: w.index, destino: w.name,
       valor: abastecer.valor, symbol: net.symbol, rede: net.rotulo || net.name, usd: abastecer.usd,
-      hash: t.hash, explorer: net.explorer + t.hash, status: 'processando'
+      hash: t.hash, explorer: linkExplorer(net, t.hash), status: 'processando'
     });
-    const res = await esperarConfirmacao(net, t.hash);
+    const res = await esperarConfirmacao(net, t.hash, plano.tanque.index);
     atualizarAtividade(idTaxa, { status: res === 'ok' ? 'confirmado' : res });
-    if (res !== 'ok') throw new Error(`O abastecimento da taxa não confirmou (${res}). Nada de ${asset.symbol} foi enviado. Veja: ${net.explorer + t.hash}`);
+    if (res !== 'ok') throw new Error(`O abastecimento da taxa não confirmou (${res}). Nada de ${asset.symbol} foi enviado. Veja: ${linkExplorer(net, t.hash)}`);
     // aviso de carteira de taxas acabando
     try {
       const sobra = await fetchBalance(plano.tanque.index, plano.nat.id);
@@ -583,9 +657,9 @@ async function runTransfer(mode, { index, assetId, to, amount, max, velocidade }
   }
 
   // 2) envia de verdade
-  const e = await prepararOuEnviar('send', { index, asset, net, to, amount, max, velocidade });
+  const e = await prepararOuEnviar('send', { index, asset, net, to, amount, max, velocidade, memo });
   out.hash = e.hash;
-  out.explorer = net.explorer + e.hash;
+  out.explorer = linkExplorer(net, e.hash);
   out.amount = fmt(e.value, e.decimals, e.decimals);
   const texto = `${out.amount} ${asset.symbol} na rede ${net.rotulo || net.name}`;
   const dest = readJson(dataFile()).wallets.find((x) => {
@@ -596,10 +670,10 @@ async function runTransfer(mode, { index, assetId, to, amount, max, velocidade }
     rede: net.rotulo || net.name, usd: usdDe(asset.symbol, e.value, e.decimals), para: e.to,
     indexDestino: dest ? dest.index : undefined, destino: dest ? dest.name : undefined,
     taxa: fmt(e.fee, e.feeDecimals) + ' ' + net.symbol, taxaUsd: usdDe(net.symbol, e.fee, e.feeDecimals),
-    hash: e.hash, explorer: net.explorer + e.hash, status: 'processando'
+    hash: e.hash, explorer: linkExplorer(net, e.hash), status: 'processando', memo: memo || undefined
   });
   alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Envio em processamento…', corpo: `${texto} · carteira ${w.name}` });
-  acompanharEnvio(net, e.hash, texto, w, idAtiv);
+  acompanharEnvio(net, e.hash, texto, w, idAtiv, index);
   setTimeout(cicloMonitor, 1500);
   return out;
 }
@@ -637,7 +711,7 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteira
   const clean = {};
   for (const id of Object.keys(NETWORKS)) {
     const u = String((rpc && rpc[id]) || '').trim();
-    if (u && !/^https:\/\//i.test(u)) throw new Error(`O servidor da rede ${NETWORKS[id].name} precisa começar com https://`);
+    if (u && !/^(https|wss):\/\//i.test(u)) throw new Error(`O servidor da rede ${NETWORKS[id].name} precisa começar com https:// (ou wss://)`);
     if (u && u !== NETWORKS[id].rpc) clean[id] = u;
   }
   const atual = settings();
@@ -744,6 +818,12 @@ app.whenReady().then(() => {
           const mk = await c('mercado');
           out.push('mercado ' + mk.moedas.length + ' moedas; dolar ' + JSON.stringify(mk.dolar) + '; erro ' + mk.erro + '; top3 ' + mk.moedas.slice(0, 3).map(m => m.symbol + '=' + m.usd).join(','));
           out.push('icones2 ' + [...document.querySelectorAll('img.icone')].filter(i => i.naturalWidth > 0).map(i => i.dataset.icone).join(','));
+          for (const id of ['btc', 'ltc', 'doge', 'bch', 'sol', 'xrp', 'ton', 'ada']) await t('endereco ' + id, async () => (await c('receive', { index: 0, assetId: id })).address);
+          await t('estimar btc', () => c('estimate', { index: 0, assetId: 'btc', to: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu', amount: '0.0001' }));
+          await t('estimar sol', () => c('estimate', { index: 0, assetId: 'sol', to: '11111111111111111111111111111112', amount: '0.01' }));
+          await t('estimar xrp', () => c('estimate', { index: 0, assetId: 'xrp', to: 'rHsMGQEkVNJmpGWs8XUBoTBiAAbwxZN5v3', amount: '1', memo: '123' }));
+          await t('estimar ada', () => c('estimate', { index: 0, assetId: 'ada', to: 'addr1qxxe304qg9py8hyyqu8evfj4wln7dnms943wsugpdzzsxnkvvjljtzuwxvx0pnwelkcruy95ujkq3aw6rl0vvg32x99q5t8yha', amount: '2' }));
+          await t('estimar ton', () => c('estimate', { index: 0, assetId: 'ton', to: 'UQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqEDI', amount: '0.1' }));
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
           await t('importar frase', async () => (await c('importWallet', { tipo: 'frase', segredo: 'test test test test test test test test test test test junk', name: 'Outra', quantidade: 2 })).map(w => w.name));
           await t('lista final', async () => (await c('wallets')).map(w => w.name + ' ' + w.evmAddress.slice(0, 10) + ' ' + w.tronAddress.slice(0, 6) + (w.importada ? ' (imp)' : '')));

@@ -22,6 +22,38 @@ const NETWORKS = {
     standard: 'Avalanche C-Chain', rpc: 'https://avalanche-c-chain-rpc.publicnode.com',
     explorer: 'https://snowtrace.io/tx/', minPriorityGwei: 0
   },
+  bitcoin: {
+    id: 'bitcoin', rotulo: 'Bitcoin', name: 'Bitcoin', kind: 'utxo', coin: 'btc', symbol: 'BTC',
+    standard: 'Bitcoin', rpc: 'https://mempool.space/api', explorer: 'https://mempool.space/tx/', lento: 30000
+  },
+  litecoin: {
+    id: 'litecoin', rotulo: 'Litecoin', name: 'Litecoin', kind: 'utxo', coin: 'ltc', symbol: 'LTC',
+    standard: 'Litecoin', rpc: 'https://litecoinspace.org/api', explorer: 'https://litecoinspace.org/tx/', lento: 30000
+  },
+  dogecoin: {
+    id: 'dogecoin', rotulo: 'Dogecoin', name: 'Dogecoin', kind: 'utxo', coin: 'doge', symbol: 'DOGE',
+    standard: 'Dogecoin', rpc: 'https://api.bitcore.io/api/DOGE/mainnet', explorer: 'https://blockchair.com/dogecoin/transaction/', lento: 30000
+  },
+  bitcoincash: {
+    id: 'bitcoincash', rotulo: 'Bitcoin Cash', name: 'Bitcoin Cash', kind: 'utxo', coin: 'bch', symbol: 'BCH',
+    standard: 'Bitcoin Cash', rpc: 'https://api.bitcore.io/api/BCH/mainnet', explorer: 'https://blockchair.com/bitcoin-cash/transaction/', lento: 30000
+  },
+  solana: {
+    id: 'solana', rotulo: 'Solana', name: 'Solana', kind: 'solana', symbol: 'SOL',
+    standard: 'SPL', rpc: 'https://solana-rpc.publicnode.com', explorer: 'https://solscan.io/tx/', lento: 6000
+  },
+  xrp: {
+    id: 'xrp', rotulo: 'XRP Ledger', name: 'XRP Ledger', kind: 'xrp', symbol: 'XRP', memo: 'tag',
+    standard: 'XRP', rpc: 'wss://xrplcluster.com', explorer: 'https://livenet.xrpl.org/transactions/', lento: 10000
+  },
+  ton: {
+    id: 'ton', rotulo: 'TON', name: 'TON', kind: 'ton', symbol: 'TON', memo: 'comentario',
+    standard: 'TON', rpc: 'https://toncenter.com/api/v2/jsonRPC', explorer: 'https://tonviewer.com/', lento: 20000
+  },
+  cardano: {
+    id: 'cardano', rotulo: 'Cardano', name: 'Cardano', kind: 'cardano', symbol: 'ADA',
+    standard: 'Cardano', rpc: 'https://api.koios.rest/api/v1', explorer: 'https://cardanoscan.io/transaction/', lento: 30000
+  },
   tron: {
     id: 'tron', rotulo: 'Tron (TRC-20)', name: 'Tron', kind: 'tron', symbol: 'TRX',
     standard: 'TRC-20', rpc: 'https://api.trongrid.io',
@@ -31,18 +63,22 @@ const NETWORKS = {
 
 // decimals: para tokens o app sempre lê o valor direto do contrato (o número aqui é só referência).
 const ASSETS = [
-  // Moedas principais de cada rede
-  { id: 'eth',  symbol: 'ETH',  name: 'Ethereum',              network: 'ethereum',  native: true, decimals: 18 },
-  { id: 'bnb',  symbol: 'BNB',  name: 'Binance Coin',          network: 'bsc',       native: true, decimals: 18 },
-  { id: 'pol',  symbol: 'POL',  name: 'Polygon (antigo MATIC)', network: 'polygon',  native: true, decimals: 18 },
-  { id: 'avax', symbol: 'AVAX', name: 'Avalanche',             network: 'avalanche', native: true, decimals: 18 },
-  { id: 'trx',  symbol: 'TRX',  name: 'Tron',                  network: 'tron',      native: true, decimals: 6 },
+  { id: 'btc',  symbol: 'BTC',  name: 'Bitcoin',      network: 'bitcoin',     native: true, decimals: 8 },
+  { id: 'eth',  symbol: 'ETH',  name: 'Ethereum',     network: 'ethereum',    native: true, decimals: 18 },
+  { id: 'ada',  symbol: 'ADA',  name: 'Cardano',      network: 'cardano',     native: true, decimals: 6 },
+  { id: 'bch',  symbol: 'BCH',  name: 'Bitcoin Cash', network: 'bitcoincash', native: true, decimals: 8 },
+  { id: 'ltc',  symbol: 'LTC',  name: 'Litecoin',     network: 'litecoin',    native: true, decimals: 8 },
+  { id: 'doge', symbol: 'DOGE', name: 'Dogecoin',     network: 'dogecoin',    native: true, decimals: 8 },
+  { id: 'xrp',  symbol: 'XRP',  name: 'XRP',          network: 'xrp',         native: true, decimals: 6 },
 
   // USDT
-  { id: 'usdt-eth',     symbol: 'USDT', name: 'Tether', network: 'ethereum', contract: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-  { id: 'usdt-bsc',     symbol: 'USDT', name: 'Tether', network: 'bsc',      contract: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
-  { id: 'usdt-polygon', symbol: 'USDT', name: 'Tether', network: 'polygon',  contract: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
   { id: 'usdt-tron',    symbol: 'USDT', name: 'Tether', network: 'tron',     contract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', decimals: 6 },
+  { id: 'usdt-bsc',     symbol: 'USDT', name: 'Tether', network: 'bsc',      contract: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
+  { id: 'usdt-eth',     symbol: 'USDT', name: 'Tether', network: 'ethereum', contract: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
+  { id: 'usdt-polygon', symbol: 'USDT', name: 'Tether', network: 'polygon',  contract: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
+
+  { id: 'bnb',  symbol: 'BNB',  name: 'Binance Coin', network: 'bsc',  native: true, decimals: 18 },
+  { id: 'trx',  symbol: 'TRX',  name: 'Tron',         network: 'tron', native: true, decimals: 6 },
 
   // USDC
   { id: 'usdc-eth',     symbol: 'USDC', name: 'USD Coin', network: 'ethereum', contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
@@ -51,10 +87,14 @@ const ASSETS = [
   { id: 'usdc-tron',    symbol: 'USDC', name: 'USD Coin', network: 'tron',     contract: 'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8', decimals: 6,
     aviso: 'A Circle (emissora do USDC) parou de dar suporte ao USDC na rede Tron. Prefira outra rede para USDC.' },
 
-  // Tokens na rede Ethereum
-  { id: 'shib',   symbol: 'SHIB',   name: 'Shiba Inu',         network: 'ethereum', contract: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18 },
-  { id: 'pepe',   symbol: 'PEPE',   name: 'Pepe',              network: 'ethereum', contract: '0x6982508145454Ce325dDbE47a25d4ec3d2311933', decimals: 18 },
-  { id: 'lblock', symbol: 'LBLOCK', name: 'Lucky Block (V2)',  network: 'ethereum', contract: '0x2b867efd2de4ad2b583ca0cb3df9c4040ef4d329', decimals: null }
+  { id: 'lblock', symbol: 'LBLOCK', name: 'Lucky Block (V2)', network: 'ethereum', contract: '0x2b867efd2de4ad2b583ca0cb3df9c4040ef4d329', decimals: null },
+  { id: 'sol',  symbol: 'SOL',  name: 'Solana',                network: 'solana',    native: true, decimals: 9 },
+  { id: 'avax', symbol: 'AVAX', name: 'Avalanche',             network: 'avalanche', native: true, decimals: 18 },
+  { id: 'pol',  symbol: 'POL',  name: 'Polygon (antigo MATIC)', network: 'polygon',  native: true, decimals: 18 },
+  { id: 'shib', symbol: 'SHIB', name: 'Shiba Inu', network: 'ethereum', contract: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18 },
+  { id: 'pepe', symbol: 'PEPE', name: 'Pepe',      network: 'ethereum', contract: '0x6982508145454Ce325dDbE47a25d4ec3d2311933', decimals: 18 },
+  { id: 'bonk', symbol: 'BONK', name: 'Bonk',      network: 'solana',   contract: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5 },
+  { id: 'ton',  symbol: 'TON',  name: 'Toncoin',   network: 'ton',      native: true, decimals: 9 }
 ];
 
 module.exports = { NETWORKS, ASSETS };
