@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const api = (ch, arg) => window.api.call(ch, arg);
+const rpc = (ch, arg) => window.api.call(ch, arg);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let modoFrase = 'criar'; // 'criar' | 'importar'
@@ -34,7 +34,7 @@ function fecharModal() {
 
 // ---------- Início ----------
 async function iniciar() {
-  const s = await api('state');
+  const s = await rpc('state');
   if (!s.exists) return mostrar('tela-inicio');
   if (!s.unlocked) {
     mostrar('tela-desbloquear');
@@ -46,7 +46,7 @@ async function iniciar() {
 
 $('btn-criar').onclick = async () => {
   modoFrase = 'criar';
-  fraseNova = await api('newPhrase');
+  fraseNova = await rpc('newPhrase');
   $('frase-titulo').textContent = 'Sua frase secreta';
   $('frase-palavras').innerHTML = fraseNova.split(' ').map((w) => `<li>${esc(w)}</li>`).join('');
   $('frase-mostrar').classList.remove('hidden');
@@ -74,7 +74,7 @@ $('frase-continuar').onclick = async () => {
   if (modoFrase === 'criar' && !$('frase-ok').checked) return (erro.textContent = 'Marque que você anotou as 12 palavras.');
   if ($('senha1').value !== $('senha2').value) return (erro.textContent = 'As senhas não são iguais.');
   try {
-    await api('create', {
+    await rpc('create', {
       phrase: modoFrase === 'criar' ? fraseNova : $('frase-input').value,
       password: $('senha1').value,
       firstName: $('primeiro-nome').value
@@ -91,7 +91,7 @@ async function entrar() {
   $('entrar-erro').textContent = '';
   $('btn-entrar').disabled = true;
   try {
-    await api('unlock', { password: $('senha-entrar').value });
+    await rpc('unlock', { password: $('senha-entrar').value });
     $('senha-entrar').value = '';
     await abrirPrincipal();
   } catch (e) {
@@ -106,14 +106,14 @@ $('senha-entrar').onkeydown = (e) => { if (e.key === 'Enter') entrar(); };
 // ---------- Tela principal ----------
 async function abrirPrincipal() {
   mostrar('tela-principal');
-  moedas = await api('assets');
+  moedas = await rpc('assets');
   await carregarCarteiras();
   if (atual == null || !carteiras.some((c) => c.index === atual)) atual = carteiras[0].index;
   selecionar(atual);
 }
 
 async function carregarCarteiras() {
-  carteiras = await api('wallets');
+  carteiras = await rpc('wallets');
   $('lista-carteiras').innerHTML = carteiras.map((c) => `
     <li data-i="${c.index}" class="${c.index === atual ? 'ativa' : ''}">
       ${esc(c.name)}<small>${esc(c.evmAddress.slice(0, 8))}…${esc(c.evmAddress.slice(-6))}</small>
@@ -169,7 +169,7 @@ async function atualizarSaldos() {
     while (fila.length) {
       const m = fila.shift();
       try {
-        saldos[m.id] = await api('balance', { index: indice, assetId: m.id });
+        saldos[m.id] = await rpc('balance', { index: indice, assetId: m.id });
       } catch (e) {
         saldos[m.id] = { erro: e.message };
       }
@@ -184,7 +184,7 @@ $('btn-atualizar').onclick = () => atualizarSaldos();
 $('so-com-saldo').onchange = () => desenharTabela();
 
 for (const b of document.querySelectorAll('[data-copiar]')) {
-  b.onclick = async () => { await api('copy', { text: $(b.dataset.copiar).textContent }); aviso('Endereço copiado'); };
+  b.onclick = async () => { await rpc('copy', { text: $(b.dataset.copiar).textContent }); aviso('Endereço copiado'); };
 }
 
 // ---------- Nova carteira / renomear ----------
@@ -200,7 +200,7 @@ $('btn-nova').onclick = () => {
   $('m-cancelar').onclick = fecharModal;
   $('m-ok').onclick = async () => {
     try {
-      const w = await api('addWallet', { name: $('m-nome').value });
+      const w = await rpc('addWallet', { name: $('m-nome').value });
       fecharModal();
       atual = w.index;
       await carregarCarteiras();
@@ -230,7 +230,7 @@ $('btn-renomear').onclick = () => {
   $('m-cancelar').onclick = fecharModal;
   $('m-ok').onclick = async () => {
     try {
-      await api('renameWallet', { index: atual, name: $('m-nome').value });
+      await rpc('renameWallet', { index: atual, name: $('m-nome').value });
       fecharModal();
       await carregarCarteiras();
       selecionar(atual);
@@ -241,7 +241,7 @@ $('btn-renomear').onclick = () => {
 // ---------- Receber ----------
 async function receber(assetId) {
   try {
-    const r = await api('receive', { index: atual, assetId });
+    const r = await rpc('receive', { index: atual, assetId });
     abrirModal(`
       <h2>Receber ${esc(r.symbol)}</h2>
       <p class="alerta-rede">Envie <b>somente ${esc(r.symbol)} pela rede ${esc(r.networkName)}${r.standard && r.symbol !== 'TRX' ? ' (' + esc(r.standard) + ')' : ''}</b> para este endereço. Se mandarem por outra rede, o dinheiro pode ser perdido.</p>
@@ -249,7 +249,7 @@ async function receber(assetId) {
       <img class="qr" src="${r.qr}" width="240" height="240" alt="QR Code">
       <div class="end-grande"><code>${esc(r.address)}</code></div>
       <div class="linha"><button id="m-copiar" class="primario">Copiar endereço</button><button id="m-fechar">Fechar</button></div>`);
-    $('m-copiar').onclick = async () => { await api('copy', { text: r.address }); aviso('Endereço copiado'); };
+    $('m-copiar').onclick = async () => { await rpc('copy', { text: r.address }); aviso('Endereço copiado'); };
     $('m-fechar').onclick = fecharModal;
   } catch (e) { aviso(e.message); }
 }
@@ -303,7 +303,7 @@ function enviar(assetId) {
     $('e-calcular').disabled = true;
     $('e-calcular').textContent = 'Calculando…';
     try {
-      const r = await api('estimate', dados());
+      const r = await rpc('estimate', dados());
       const destino = carteiras.find((c) => c.evmAddress.toLowerCase() === r.to.toLowerCase() || c.tronAddress === r.to);
       $('e-resumo').innerHTML = `<div class="resumo">
         <div><span class="rot">Valor:</span> <b>${esc(r.amount)} ${esc(r.symbol)}</b></div>
@@ -332,7 +332,7 @@ function enviar(assetId) {
     btn.textContent = 'Enviando…';
     $('e-cancelar').disabled = true;
     try {
-      const r = await api('send', dados());
+      const r = await rpc('send', dados());
       abrirModal(`
         <h2 class="ok">Envio feito ✓</h2>
         <div class="resumo">
@@ -343,7 +343,7 @@ function enviar(assetId) {
         </div>
         <p class="sub">A rede pode levar de alguns segundos a alguns minutos para confirmar. Depois clique em "Atualizar saldos".</p>
         <div class="linha"><button id="m-explorer">Ver no explorador</button><button id="m-fechar" class="primario">Fechar</button></div>`);
-      $('m-explorer').onclick = () => api('openExternal', { url: r.explorer });
+      $('m-explorer').onclick = () => rpc('openExternal', { url: r.explorer });
       $('m-fechar').onclick = () => { fecharModal(); atualizarSaldos(); };
     } catch (e) {
       $('e-erro').textContent = e.message;
@@ -378,20 +378,20 @@ function pedirSenha(titulo, explicacao, aoConfirmar) {
 $('btn-frase').onclick = () => pedirSenha('Frase secreta',
   'Nunca mostre estas palavras para ninguém. Quem tiver a frase controla <b>todas</b> as carteiras.',
   async (senha) => {
-    const f = await api('revealPhrase', { password: senha });
+    const f = await rpc('revealPhrase', { password: senha });
     return `<ol class="palavras">${f.split(' ').map((w) => `<li>${esc(w)}</li>`).join('')}</ol>`;
   });
 
 $('btn-exportar').onclick = () => pedirSenha(`Exportar chave – ${carteiraAtual().name}`,
   'A chave privada dá acesso total a esta carteira. Use só para importar em outro app seu (ex.: MetaMask ou TronLink).',
   async (senha) => {
-    const k = await api('exportKey', { index: atual, password: senha });
+    const k = await rpc('exportKey', { index: atual, password: senha });
     return `<label>Chave Ethereum / BNB / Polygon / Avalanche</label><div class="end-grande"><code>${esc(k.evm)}</code></div>
             <label>Chave Tron</label><div class="end-grande"><code>${esc(k.tron)}</code></div>`;
   });
 
 $('btn-bloquear').onclick = async () => {
-  await api('lock');
+  await rpc('lock');
   carteiras = [];
   mostrar('tela-desbloquear');
   $('senha-entrar').focus();
@@ -399,7 +399,7 @@ $('btn-bloquear').onclick = async () => {
 
 // ---------- Configurações ----------
 $('btn-config').onclick = async () => {
-  const s = await api('getSettings');
+  const s = await rpc('getSettings');
   abrirModal(`
     <h2>Configurações</h2>
     <p class="sub">Servidores usados para consultar saldo e enviar. Deixe como está se tudo estiver funcionando.</p>
@@ -416,7 +416,7 @@ $('btn-config').onclick = async () => {
     const rpc = {};
     for (const i of document.querySelectorAll('[data-rpc]')) rpc[i.dataset.rpc] = i.value;
     try {
-      await api('saveSettings', { rpc, tronApiKey: $('c-tronkey').value });
+      await rpc('saveSettings', { rpc, tronApiKey: $('c-tronkey').value });
       fecharModal();
       aviso('Configurações salvas');
       atualizarSaldos();
@@ -455,15 +455,15 @@ function desenharUpd() {
     corpo = '<p class="sub">Clique em "Procurar atualizações".</p>';
   }
   $('u-corpo').innerHTML = corpo;
-  if ($('u-baixar')) $('u-baixar').onclick = () => api('updDownload').catch((e) => aviso(e.message));
-  if ($('u-instalar')) $('u-instalar').onclick = () => api('updInstall').catch((e) => aviso(e.message));
+  if ($('u-baixar')) $('u-baixar').onclick = () => rpc('updDownload').catch((e) => aviso(e.message));
+  if ($('u-instalar')) $('u-instalar').onclick = () => rpc('updInstall').catch((e) => aviso(e.message));
 }
 
 window.api.onUpdate((d) => { upd = { ...upd, ...d }; desenharUpd(); });
-api('updState').then((d) => { upd = d; desenharUpd(); }).catch(() => {});
+rpc('updState').then((d) => { upd = d; desenharUpd(); }).catch(() => {});
 
 $('btn-atualizacoes').onclick = async () => {
-  upd = await api('updState');
+  upd = await rpc('updState');
   abrirModal(`
     <h2>Atualizações</h2>
     <p class="sub">Versão instalada: <b>${esc(upd.versaoAtual)}</b></p>
@@ -472,7 +472,7 @@ $('btn-atualizacoes').onclick = async () => {
   updAberto = true;
   desenharUpd();
   $('m-fechar').onclick = () => { updAberto = false; fecharModal(); };
-  $('u-verificar').onclick = () => api('updCheck').catch((e) => { upd.status = 'erro'; upd.erro = e.message; desenharUpd(); });
+  $('u-verificar').onclick = () => rpc('updCheck').catch((e) => { upd.status = 'erro'; upd.erro = e.message; desenharUpd(); });
 };
 
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('modal-fundo').classList.contains('hidden')) fecharModal(); });
