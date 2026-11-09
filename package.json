@@ -1,7 +1,7 @@
 {
   "name": "carteira-janio",
   "productName": "Carteira Janio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Carteira de criptomoedas com várias carteiras (Etapa 1: Ethereum, BNB Chain, Polygon, Avalanche, Tron)",
   "author": "Janio",
   "license": "UNLICENSED",
