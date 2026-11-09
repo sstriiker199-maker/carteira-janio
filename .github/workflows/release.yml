@@ -18,6 +18,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
@@ -37,6 +39,11 @@ jobs:
               echo "Versão v$V sem instalador: apagando para enviar de novo"
               gh release delete "v$V" -y --cleanup-tag
             fi
+          fi
+          git fetch --tags --force
+          if ! git rev-parse "v$V" >/dev/null 2>&1; then
+            git tag "v$V"
+            git push origin "v$V"
           fi
 
       - name: Montar e publicar instalador
