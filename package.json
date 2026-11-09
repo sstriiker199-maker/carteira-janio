@@ -27,7 +27,7 @@
     "@solana/spl-token": "^0.4.9",
     "xrpl": "^4.2.0",
     "@ton/ton": "^15.1.0",
-    "@ton/core": "^0.60.0",
+    "@ton/core": "^0.62.0",
     "@ton/crypto": "^3.3.0",
     "@emurgo/cardano-serialization-lib-nodejs": "^12.1.1"
   },
