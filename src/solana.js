@@ -16,16 +16,16 @@ function validar(addr) {
   try { return new web3.PublicKey(String(addr).trim()); } catch { return null; }
 }
 
+// Saldo na conta de token padrão (ATA) — consulta simples, aceita por servidores gratuitos
 async function saldoToken(c, dono, mint) {
-  const r = await c.getParsedTokenAccountsByOwner(dono, { mint: new web3.PublicKey(mint) });
-  let raw = 0n;
-  let decimals = null;
-  for (const a of r.value) {
-    const info = a.account.data.parsed.info.tokenAmount;
-    raw += BigInt(info.amount);
-    decimals = info.decimals;
+  const ata = spl.getAssociatedTokenAddressSync(new web3.PublicKey(mint), dono, true);
+  try {
+    const r = await c.getTokenAccountBalance(ata);
+    return { raw: BigInt(r.value.amount), decimals: r.value.decimals };
+  } catch (e) {
+    if (/could not find account|Invalid param: could not find|not found/i.test(String(e.message))) return { raw: 0n, decimals: null };
+    throw e;
   }
-  return { raw, decimals };
 }
 
 async function saldo(cfg, asset, addr) {

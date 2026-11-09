@@ -479,6 +479,23 @@ handle('monitorFoco', ({ index }) => { foco = Number(index); cicloMonitor(); ret
 handle('monitorAgora', () => { cicloMonitor(); return true; });
 handle('resumo', () => resumo());
 
+// Só no teste automático: monta e assina transações de BTC/LTC/DOGE/BCH com moedas fictícias (não envia nada)
+if (process.env.CARTEIRA_TESTE) {
+  handle('testeAssinar', () => {
+    const u = MOD.utxo();
+    const out = {};
+    for (const net of Object.values(NETWORKS).filter((n) => n.kind === 'utxo')) {
+      try {
+        const chave = chaveRede(1, net);
+        const destino = addressFor(0, net.id);
+        const plano = { usados: [{ txid: 'ab'.repeat(32), vout: 0, value: 100000000 }], valor: 50000000, troco: 49000000, script: u.scriptDestino(net.coin, destino) };
+        out[net.coin] = 'ok ' + u.montarTx(net.coin, chave, plano).length + ' hex';
+      } catch (e) { out[net.coin] = 'ERRO ' + e.message; }
+    }
+    return out;
+  });
+}
+
 handle('mercado', async () => {
   await precos.atualizar().catch(() => {});
   let erro = null;
@@ -821,9 +838,13 @@ app.whenReady().then(() => {
           for (const id of ['btc', 'ltc', 'doge', 'bch', 'sol', 'xrp', 'ton', 'ada']) await t('endereco ' + id, async () => (await c('receive', { index: 0, assetId: id })).address);
           await t('estimar btc', () => c('estimate', { index: 0, assetId: 'btc', to: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu', amount: '0.0001' }));
           await t('estimar sol', () => c('estimate', { index: 0, assetId: 'sol', to: '11111111111111111111111111111112', amount: '0.01' }));
-          await t('estimar xrp', () => c('estimate', { index: 0, assetId: 'xrp', to: 'rHsMGQEkVNJmpGWs8XUBoTBiAAbwxZN5v3', amount: '1', memo: '123' }));
-          await t('estimar ada', () => c('estimate', { index: 0, assetId: 'ada', to: 'addr1qxxe304qg9py8hyyqu8evfj4wln7dnms943wsugpdzzsxnkvvjljtzuwxvx0pnwelkcruy95ujkq3aw6rl0vvg32x99q5t8yha', amount: '2' }));
-          await t('estimar ton', () => c('estimate', { index: 0, assetId: 'ton', to: 'UQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqEDI', amount: '0.1' }));
+          const dest2 = async (id) => (await c('receive', { index: 1, assetId: id })).address;
+          await t('estimar xrp', async () => c('estimate', { index: 0, assetId: 'xrp', to: await dest2('xrp'), amount: '1', memo: '123' }));
+          await t('estimar ada', async () => c('estimate', { index: 0, assetId: 'ada', to: await dest2('ada'), amount: '2' }));
+          await t('estimar ton', async () => c('estimate', { index: 0, assetId: 'ton', to: await dest2('ton'), amount: '0.1' }));
+          await t('estimar sol->janio2', async () => c('estimate', { index: 0, assetId: 'sol', to: await dest2('sol'), amount: '0.01', velocidade: 'rapida' }));
+          await t('estimar bonk', async () => c('estimate', { index: 0, assetId: 'bonk', to: await dest2('sol'), amount: '1' }));
+          await t('assinar utxo', () => c('testeAssinar'));
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
           await t('importar frase', async () => (await c('importWallet', { tipo: 'frase', segredo: 'test test test test test test test test test test test junk', name: 'Outra', quantidade: 2 })).map(w => w.name));
           await t('lista final', async () => (await c('wallets')).map(w => w.name + ' ' + w.evmAddress.slice(0, 10) + ' ' + w.tronAddress.slice(0, 6) + (w.importada ? ' (imp)' : '')));
