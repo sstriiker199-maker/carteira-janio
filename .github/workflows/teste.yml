@@ -22,7 +22,11 @@ jobs:
           bash .github/sondas/sondar.sh > sondas.txt 2>&1 || true
           split -l 6 sondas.txt sonda_
           for f in sonda_*; do echo "::notice::$(sed ':a;N;$!ba;s/\n/%0A/g' "$f")"; done
-      - run: npm install
+      - name: Instalar dependências
+        shell: bash
+        run: |
+          npm install > npm.log 2>&1 || { grep -E 'npm (error|ERR)' npm.log | head -15 | while IFS= read -r l; do echo "::error::$l"; done; exit 1; }
+          grep -E 'Ícones|Logo|Sem logo' npm.log | while IFS= read -r l; do echo "::notice::$l"; done
       - name: Abrir o app
         shell: bash
         env:

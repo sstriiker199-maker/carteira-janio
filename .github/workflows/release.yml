@@ -56,7 +56,9 @@ jobs:
 
       - name: Instalar dependências
         if: steps.prep.outputs.pular != '1'
-        run: npm install
+        shell: bash
+        run: |
+          npm install > npm.log 2>&1 || { grep -E 'npm (error|ERR)' npm.log | head -15 | while IFS= read -r l; do echo "::error::$l"; done; exit 1; }
 
       - name: Montar e enviar instalador
         if: steps.prep.outputs.pular != '1'
