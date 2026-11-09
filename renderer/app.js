@@ -588,6 +588,77 @@ async function resolverDestino(valor, assetId) {
   return f ? { endereco: f.endereco, memo: f.memo || '', nome: f.nome } : null;
 }
 
+// ---------- Trocar (swap) ----------
+// reserva para a taxa quando o usuário clica em Máx numa moeda principal
+const RESERVA = { ETH: 0.0005, BNB: 0.0005, POL: 0.05, AVAX: 0.005, TRX: 2, BTC: 0.00005, LTC: 0.0005, DOGE: 2, BCH: 0.0002, SOL: 0.0001, XRP: 1.1, TON: 0.05, ADA: 0.5 };
+
+$('btn-trocar').onclick = () => {
+  const comSaldo = moedas.filter((m) => saldos[m.id] && !saldos[m.id].zero && !saldos[m.id].erro && !saldos[m.id].indisponivel);
+  if (!comSaldo.length) { aviso('Esta carteira não tem saldo para trocar.'); return; }
+  const opDe = comSaldo.map((m) => `<option value="${m.id}">${esc(m.symbol)} — ${esc(m.rotulo)} (saldo ${esc(saldos[m.id].balance)})</option>`).join('');
+  const opPara = moedas.map((m) => `<option value="${m.id}">${esc(m.symbol)} — ${esc(m.rotulo)}</option>`).join('');
+  abrirModal(`
+    <h2>🔄 Trocar moedas</h2>
+    <label>Você envia</label>
+    <select id="s-de">${opDe}</select>
+    <div class="campo-valor"><input id="s-valor" placeholder="Quantidade" inputmode="decimal"><button id="s-max">Máx</button></div>
+    <label>Você recebe</label>
+    <select id="s-para">${opPara}</select>
+    <label>Receber na carteira</label>
+    <select id="s-destino">${carteiras.map((c) => `<option value="${c.index}" ${c.index === atual ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+    <p class="ajuda">A troca é feita pela SideShift.ai. A taxa dela já vem embutida na cotação. Valores muito pequenos podem não ser aceitos (mínimo deles).</p>
+    <p id="m-erro" class="erro"></p>
+    <div id="s-resumo"></div>
+    <div class="linha" id="s-botoes"><button id="m-fechar">Cancelar</button><button id="s-cotar" class="primario">Ver cotação</button></div>`);
+  $('m-fechar').onclick = fecharModal;
+  const limpar = () => { $('s-resumo').innerHTML = ''; $('m-erro').textContent = ''; const c = $('s-confirmar'); if (c) c.remove(); };
+  for (const id of ['s-de', 's-para', 's-valor', 's-destino']) $(id).addEventListener('input', limpar);
+  $('s-max').onclick = () => {
+    const m = moedas.find((x) => x.id === $('s-de').value);
+    const sld = saldos[m.id];
+    let v = parseFloat(sld.balance) || 0;
+    if (m.native) v = Math.max(0, v - (RESERVA[m.symbol] || 0));
+    $('s-valor').value = String(Number(v.toFixed(Math.min(8, m.decimals || 8))));
+    limpar();
+  };
+  $('s-cotar').onclick = async () => {
+    limpar();
+    $('s-cotar').disabled = true;
+    $('s-cotar').textContent = 'Cotando…';
+    try {
+      const q = await rpc('swapCotar', { index: atual, de: $('s-de').value, para: $('s-para').value, amount: $('s-valor').value });
+      const ate = new Date(q.expira).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      $('s-resumo').innerHTML = `<div class="resumo">
+        <div><span class="rot">Você envia:</span> <b>${esc(q.envia)} ${esc(q.de)}</b> ${q.usdEnvia != null ? '<span class="cinza">(≈ ' + esc(dolar(q.usdEnvia)) + ')</span>' : ''}</div>
+        <div><span class="rot">Você recebe:</span> <b>≈ ${esc(q.recebe)} ${esc(q.para)}</b> ${q.usdRecebe != null ? '<span class="cinza">(≈ ' + esc(dolar(q.usdRecebe)) + ')</span>' : ''}</div>
+        <div><span class="rot">Cotação:</span> 1 = ${esc(Number(q.taxa).toPrecision(6))}</div>
+        <div><span class="rot">Válida até:</span> ${esc(ate)}</div>
+        ${q.usdEnvia && q.usdRecebe ? `<div><span class="rot">Custo da troca:</span> ≈ ${esc(dolar(q.usdEnvia - q.usdRecebe))} (${esc(((1 - q.usdRecebe / q.usdEnvia) * 100).toFixed(2).replace('.', ','))}%)</div>` : ''}
+      </div>
+      <p class="sub">Ao confirmar, o programa envia o valor para a SideShift (mais a taxa normal da rede) e você recebe a outra moeda em alguns minutos. Você será avisado quando chegar.</p>`;
+      const b = document.createElement('button');
+      b.id = 's-confirmar';
+      b.className = 'perigo';
+      b.textContent = 'Confirmar troca';
+      $('s-botoes').appendChild(b);
+      b.onclick = async () => {
+        b.disabled = true;
+        b.textContent = 'Enviando…';
+        try {
+          const r = await rpc('swapExecutar', { quoteId: q.quoteId, index: atual, de: $('s-de').value, para: $('s-para').value, destinoIndex: Number($('s-destino').value) });
+          abrirModal(`<h2 class="ok">Troca iniciada ✓</h2>
+            <p>Você enviou <b>${esc(r.envia)}</b> e vai receber <b>≈ ${esc(r.recebe)}</b>. Isso costuma levar de 2 a 30 minutos, conforme a rede.</p>
+            <p class="sub">Você recebe um aviso quando a troca terminar. Acompanhe também em Atividade.</p>
+            <div class="linha"><button id="s-pagina">Ver na SideShift</button><button id="m-fechar" class="primario">Fechar</button></div>`);
+          $('s-pagina').onclick = () => rpc('openExternal', { url: r.pagina });
+          $('m-fechar').onclick = fecharModal;
+        } catch (e) { $('m-erro').textContent = e.message; b.disabled = false; b.textContent = 'Confirmar troca'; }
+      };
+    } catch (e) { $('m-erro').textContent = e.message; }
+    finally { if ($('s-cotar')) { $('s-cotar').disabled = false; $('s-cotar').textContent = 'Ver cotação'; } }
+  };
+};
+
 // ---------- Favoritos ----------
 $('btn-contatos').onclick = async () => {
   const lista = await rpc('contatos', {});
@@ -829,7 +900,7 @@ $('btn-atividade').onclick = async () => {
     <h2>Atividade</h2>
     <div class="linha filtros">
       <select id="at-carteira"><option value="">Todas as carteiras</option>${carteiras.map((c) => `<option value="${c.index}">${esc(c.name)}</option>`).join('')}</select>
-      <select id="at-tipo"><option value="">Tudo</option><option value="enviado">Enviados</option><option value="recebido">Recebidos</option><option value="taxa">Abastecimento de taxa</option><option value="importada">Carteiras importadas</option></select>
+      <select id="at-tipo"><option value="">Tudo</option><option value="enviado">Enviados</option><option value="recebido">Recebidos</option><option value="taxa">Abastecimento de taxa</option><option value="swap">Trocas</option><option value="importada">Carteiras importadas</option></select>
     </div>
     <div id="at-lista" class="cinza">Carregando…</div>
     <div class="linha"><button id="m-fechar" class="primario">Fechar</button></div>`);
@@ -844,7 +915,7 @@ async function carregarAtividade() {
   if (!$('at-lista')) return;
   const lista = await rpc('atividade', { index: $('at-carteira').value, tipo: $('at-tipo').value });
   if (!lista.length) { $('at-lista').textContent = 'Nada por aqui ainda.'; return; }
-  const ICON = { enviado: '↗️', recebido: '↘️', taxa: '⛽', importada: '📥' };
+  const ICON = { enviado: '↗️', recebido: '↘️', taxa: '⛽', importada: '📥', swap: '🔄' };
   const STATUS = { processando: '⏳ processando', confirmado: '✅ confirmado', falhou: '❌ falhou', pendente: '⏳ ainda não confirmado' };
   $('at-lista').classList.remove('cinza');
   $('at-lista').innerHTML = lista.map((e, i) => {
@@ -857,6 +928,9 @@ async function carregarAtividade() {
     } else if (e.tipo === 'recebido') {
       titulo = `Recebido ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
       detalhe = `Na carteira <b>${esc(e.carteira)}</b> · rede ${esc(e.rede)}`;
+    } else if (e.tipo === 'swap') {
+      titulo = `Troca: ${esc(e.valor)} ${esc(e.symbol)} → ${esc(e.recebido || e.paraValor)} ${esc(e.paraSymbol)}`;
+      detalhe = `Carteira <b>${esc(e.carteira)}</b> · de ${esc(e.rede)} para ${esc(e.paraRede)} · <b>${esc(e.status || '')}</b>`;
     } else if (e.tipo === 'taxa') {
       titulo = `Taxa abastecida: ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
       detalhe = `De <b>${esc(e.carteira)}</b> para <b>${esc(e.destino)}</b> · rede ${esc(e.rede)}`;
@@ -868,7 +942,8 @@ async function carregarAtividade() {
       <div class="ativ-corpo">
         <div class="li-topo"><b>${titulo}</b><span class="cinza">${esc(quando)}</span></div>
         <div class="ativ-det">${detalhe}</div>
-        ${e.hash ? `<div class="ativ-det">${STATUS[e.status] || ''} · <code>${esc(e.hash.slice(0, 18))}…</code> <button class="mini" data-ver="${i}">Ver transação</button></div>` : ''}
+        ${e.hash && e.tipo !== 'swap' ? `<div class="ativ-det">${STATUS[e.status] || ''} · <code>${esc(e.hash.slice(0, 18))}…</code> <button class="mini" data-ver="${i}">Ver transação</button></div>` : ''}
+        ${e.tipo === 'swap' ? `<div class="ativ-det"><button class="mini" data-ver="${i}">Ver troca na SideShift</button></div>` : ''}
       </div></div>`;
   }).join('');
   for (const b of document.querySelectorAll('[data-ver]')) b.onclick = () => rpc('openExternal', { url: lista[Number(b.dataset.ver)].explorer });

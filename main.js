@@ -523,6 +523,100 @@ handle('verificarEndereco', ({ assetId, endereco }) => {
   return { estado: 'bloqueado', mensagem: `Isso não parece um endereço da rede ${net.rotulo}. Confira se copiou o endereço inteiro.` };
 });
 
+// ---------- Troca (swap) ----------
+const swap = require('./src/swap');
+
+async function contaSwap() {
+  const atual = readJson(cfgFile()) || {};
+  if (atual.swap && atual.swap.id && atual.swap.secretCifrado) {
+    return { id: atual.swap.id, secret: alertas.decifrar(atual.swap.secretCifrado) };
+  }
+  const c = await swap.criarConta();
+  atual.swap = { id: c.id, secretCifrado: alertas.cifrar(c.secret) };
+  writeJson(cfgFile(), atual);
+  return { id: c.id, secret: c.secret };
+}
+
+// arredonda para cima nas casas decimais da moeda
+function arredondarCima(txt, casas) {
+  const [i, f = ''] = String(txt).split('.');
+  if (f.length <= casas) return txt;
+  const base = BigInt(i + f.slice(0, casas).padEnd(casas, '0')) + 1n;
+  const s2 = base.toString().padStart(casas + 1, '0');
+  return casas ? `${s2.slice(0, -casas)}.${s2.slice(-casas)}` : s2;
+}
+
+handle('swapCotar', async ({ index, de, para, amount }) => {
+  requireUnlocked();
+  const A = getAsset(de);
+  const B = getAsset(para);
+  if (de === para) throw new Error('Escolha moedas diferentes.');
+  const perm = await swap.permissoes();
+  if (!perm.createShift) throw new Error('O serviço de troca (SideShift) não está disponível na sua região/conexão.');
+  const sd = await swap.suportado(A.asset.symbol, A.net.id);
+  const sp = await swap.suportado(B.asset.symbol, B.net.id);
+  if (!sd) throw new Error(`${A.asset.symbol} na rede ${A.net.rotulo} não é aceito pelo serviço de troca.`);
+  if (!sp) throw new Error(`${B.asset.symbol} na rede ${B.net.rotulo} não é aceito pelo serviço de troca.`);
+  const valor = String(amount || '').trim().replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(valor) || Number(valor) <= 0) throw new Error('Digite o valor que você quer trocar.');
+  const conta = await contaSwap();
+  const q = await swap.cotar({ secret: conta.secret, affiliateId: conta.id, de: sd, para: sp, valor });
+  await precos.atualizar().catch(() => {});
+  const usdDe2 = precos.preco(A.asset.symbol) != null ? Number(q.depositAmount) * precos.preco(A.asset.symbol) : null;
+  const usdPara = precos.preco(B.asset.symbol) != null ? Number(q.settleAmount) * precos.preco(B.asset.symbol) : null;
+  return {
+    quoteId: q.id, envia: q.depositAmount, recebe: q.settleAmount, taxa: q.rate, expira: q.expiresAt,
+    usdEnvia: usdDe2, usdRecebe: usdPara, de: `${A.asset.symbol} (${A.net.rotulo})`, para: `${B.asset.symbol} (${B.net.rotulo})`
+  };
+});
+
+async function acompanharSwap(id, idAtiv, textoPara) {
+  const fim = Date.now() + 3 * 60 * 60 * 1000;
+  let ultimo = '';
+  while (Date.now() < fim) {
+    await new Promise((r) => setTimeout(r, 15000));
+    let st;
+    try { st = await swap.status(id); } catch { continue; }
+    if (st.status !== ultimo) {
+      ultimo = st.status;
+      const mapa = { waiting: 'aguardando depósito', pending: 'depósito detectado', processing: 'trocando', settling: 'enviando para você', settled: 'concluída', refund: 'devolvendo', refunded: 'devolvida', expired: 'expirada' };
+      atualizarAtividade(idAtiv, { status: mapa[st.status] || st.status, recebido: st.settleAmount });
+      if (st.status === 'settled') {
+        alertas.avisar({ cfg: settings(), tipo: 'entradas', log, aoClicar: abrirJanela, titulo: 'Troca concluída ✓', corpo: `Você recebeu ${st.settleAmount} ${textoPara}` });
+        cicloMonitor();
+        return;
+      }
+      if (st.status === 'refunded' || st.status === 'expired') {
+        alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: st.status === 'refunded' ? 'Troca devolvida' : 'Troca expirada', corpo: 'Veja os detalhes na aba Atividade.' });
+        return;
+      }
+    }
+  }
+}
+
+handle('swapExecutar', async ({ quoteId, index, de, para, destinoIndex }) => {
+  requireUnlocked();
+  const A = getAsset(de);
+  const B = getAsset(para);
+  const conta = await contaSwap();
+  const settleAddress = addressFor(destinoIndex != null ? Number(destinoIndex) : Number(index), B.net.id);
+  const refundAddress = addressFor(Number(index), A.net.id);
+  const sh = await swap.criarTroca({ secret: conta.secret, affiliateId: conta.id, quoteId, settleAddress, refundAddress });
+  const casas = A.asset.decimals != null ? A.asset.decimals : 18;
+  const valor = arredondarCima(sh.depositAmount, Math.min(casas, 8));
+  const w = getWallet(readJson(dataFile()), index);
+  const idAtiv = registrar({
+    tipo: 'swap', index: Number(index), carteira: w.name, valor: sh.depositAmount, symbol: A.asset.symbol, rede: A.net.rotulo,
+    paraValor: sh.settleAmount, paraSymbol: B.asset.symbol, paraRede: B.net.rotulo, status: 'enviando depósito',
+    explorer: `https://sideshift.ai/orders/${sh.id}`, hash: sh.id
+  });
+  // envia o depósito para a SideShift
+  const envio = await runTransfer('send', { index, assetId: de, to: sh.depositAddress, amount: valor, memo: sh.depositMemo || undefined });
+  atualizarAtividade(idAtiv, { status: 'aguardando a troca', depositoHash: envio.hash });
+  acompanharSwap(sh.id, idAtiv, `${B.asset.symbol} (${B.net.rotulo})`);
+  return { id: sh.id, pagina: `https://sideshift.ai/orders/${sh.id}`, envia: sh.depositAmount, recebe: sh.settleAmount };
+});
+
 // ---------- Contatos (endereços favoritos) ----------
 const contatosFile = () => path.join(dataDir(), 'contatos.json');
 handle('contatos', ({ rede }) => {
@@ -962,6 +1056,8 @@ app.whenReady().then(() => {
           await t('verif bnb 0x', () => c('verificarEndereco', { assetId: 'usdt-bsc', endereco: '0x6Fac4D18c912343BF86fa7049364Dd4E424Ab9C0' }));
           await t('verif btc errado', () => c('verificarEndereco', { assetId: 'btc', endereco: 'ltc1qjmxnz78nmc8nq77wuxh25n2es7rzm5c2rkk4wh' }));
           await t('verif lixo', () => c('verificarEndereco', { assetId: 'xrp', endereco: 'abc123' }));
+          await t('swap cotar (EUA bloqueado é esperado)', () => c('swapCotar', { index: 0, de: 'usdt-tron', para: 'sol', amount: '20' }));
+          await t('tela trocar', async () => { document.getElementById('btn-trocar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.getElementById('s-de') ? document.getElementById('s-de').options.length : -1; fecharModal(); return n + ' moedas com saldo'; });
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
