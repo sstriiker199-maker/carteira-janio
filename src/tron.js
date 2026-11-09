@@ -7,6 +7,19 @@ const FEE_LIMIT_SUN = 150_000_000; // teto de 150 TRX por envio de token (só é
 const TRX_RESERVE_SUN = 1_500_000n; // deixa 1,5 TRX para taxa/ativação de conta nova
 const decCache = {};
 
+// O servidor gratuito da TronGrid limita consultas: tenta de novo com espera
+async function retry(fn) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const msg = String((e && (e.message || e.error)) || e) + ' ' + String(e && e.response && e.response.status);
+      if (i >= 4 || !/429|rate|limit|too many/i.test(msg)) throw e;
+      await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+    }
+  }
+}
+
 function client(cfg, privateKey) {
   const opts = { fullHost: cfg.rpc };
   if (cfg.apiKey) opts.headers = { 'TRON-PRO-API-KEY': cfg.apiKey };
@@ -15,7 +28,7 @@ function client(cfg, privateKey) {
 }
 
 async function constCall(t, contract, fn, params, owner) {
-  const r = await t.transactionBuilder.triggerConstantContract(contract, fn, {}, params, owner);
+  const r = await retry(() => t.transactionBuilder.triggerConstantContract(contract, fn, {}, params, owner));
   const hex = r && r.constant_result && r.constant_result[0];
   if (hex == null) throw new Error('Falha ao consultar a rede Tron.');
   return { value: BigInt('0x' + (hex || '0')), energy: r.energy_used };
@@ -30,7 +43,7 @@ async function tokenDecimals(t, asset, owner) {
 
 async function balance(cfg, asset, address) {
   const t = client(cfg);
-  if (asset.native) return { raw: BigInt(await t.trx.getBalance(address)), decimals: 6 };
+  if (asset.native) return { raw: BigInt(await retry(() => t.trx.getBalance(address))), decimals: 6 };
   const decimals = await tokenDecimals(t, asset, address);
   const { value } = await constCall(t, asset.contract, 'balanceOf(address)', [{ type: 'address', value: address }], address);
   return { raw: value, decimals };
@@ -40,7 +53,7 @@ async function prepare({ cfg, asset, from, to, amount, max }) {
   to = String(to || '').trim();
   if (!isTronAddress(to)) throw new Error('Endereço de destino inválido para a rede Tron. Ele deve começar com T e ter 34 caracteres.');
   const t = client(cfg);
-  const trxBal = BigInt(await t.trx.getBalance(from));
+  const trxBal = BigInt(await retry(() => t.trx.getBalance(from)));
 
   if (asset.native) {
     const value = max ? trxBal - TRX_RESERVE_SUN : parseAmount(amount, 6);
@@ -64,13 +77,13 @@ async function prepare({ cfg, asset, from, to, amount, max }) {
   } catch { /* usa estimativa padrão */ }
   let energyPrice = 210;
   try {
-    const params = await t.trx.getChainParameters();
+    const params = await retry(() => t.trx.getChainParameters());
     const p = params.find((x) => x.key === 'getEnergyFee');
     if (p) energyPrice = Number(p.value);
   } catch { /* usa padrão */ }
   let freeEnergy = 0;
   try {
-    const r = await t.trx.getAccountResources(from);
+    const r = await retry(() => t.trx.getAccountResources(from));
     freeEnergy = Math.max(0, (r.EnergyLimit || 0) - (r.EnergyUsed || 0));
   } catch { /* sem energia própria */ }
   const fee = BigInt(Math.max(0, energy - freeEnergy) * energyPrice + 350_000);

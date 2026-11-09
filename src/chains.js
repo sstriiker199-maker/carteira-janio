@@ -54,7 +54,7 @@ const ASSETS = [
   // Tokens na rede Ethereum
   { id: 'shib',   symbol: 'SHIB',   name: 'Shiba Inu',         network: 'ethereum', contract: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18 },
   { id: 'pepe',   symbol: 'PEPE',   name: 'Pepe',              network: 'ethereum', contract: '0x6982508145454Ce325dDbE47a25d4ec3d2311933', decimals: 18 },
-  { id: 'lblock', symbol: 'LBLOCK', name: 'Lucky Block (V2)',  network: 'ethereum', contract: '0x2cd96e8c3ff6b5e01169f6e3b61d28204e7810bb', decimals: null }
+  { id: 'lblock', symbol: 'LBLOCK', name: 'Lucky Block (V2)',  network: 'ethereum', contract: '0x2b867efd2de4ad2b583ca0cb3df9c4040ef4d329', decimals: null }
 ];
 
 module.exports = { NETWORKS, ASSETS };
