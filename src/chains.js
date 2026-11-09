@@ -40,7 +40,7 @@ const NETWORKS = {
   },
   solana: {
     id: 'solana', rotulo: 'Solana', name: 'Solana', kind: 'solana', symbol: 'SOL',
-    standard: 'SPL', rpc: 'https://solana-rpc.publicnode.com', explorer: 'https://solscan.io/tx/', lento: 6000
+    standard: 'SPL', rpc: 'https://api.mainnet-beta.solana.com', explorer: 'https://solscan.io/tx/', lento: 6000
   },
   xrp: {
     id: 'xrp', rotulo: 'XRP Ledger', name: 'XRP Ledger', kind: 'xrp', symbol: 'XRP', memo: 'tag',
