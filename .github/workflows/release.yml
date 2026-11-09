@@ -47,7 +47,7 @@ jobs:
           set -o pipefail
           npx electron-builder --win --publish always 2>&1 | tee build.log || {
             echo "::error title=Falha no build::veja as linhas abaixo"
-            tail -n 40 build.log | while IFS= read -r line; do
+            grep -iE 'message|"code"|resource|field|uploading|url|publishing|errors|already|\\u' build.log | grep -v ratelimit | tail -n 40 | while IFS= read -r line; do
               clean=$(printf '%s' "$line" | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-400)
               [ -n "$clean" ] && echo "::error::$clean"
             done
