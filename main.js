@@ -479,6 +479,69 @@ handle('monitorFoco', ({ index }) => { foco = Number(index); cicloMonitor(); ret
 handle('monitorAgora', () => { cicloMonitor(); return true; });
 handle('resumo', () => resumo());
 
+// ---------- Contatos (endereços favoritos) ----------
+const contatosFile = () => path.join(dataDir(), 'contatos.json');
+handle('contatos', ({ rede }) => {
+  const l = readJson(contatosFile()) || [];
+  return rede ? l.filter((c) => c.rede === rede) : l;
+});
+handle('salvarContato', ({ id, nome, rede, endereco, memo }) => {
+  nome = String(nome || '').trim();
+  endereco = String(endereco || '').trim();
+  if (!nome) throw new Error('Dê um nome para o favorito.');
+  if (!endereco) throw new Error('Endereço vazio.');
+  if (!NETWORKS[rede]) throw new Error('Rede inválida.');
+  const l = readJson(contatosFile()) || [];
+  const existente = id ? l.find((c) => c.id === id) : l.find((c) => c.rede === rede && c.endereco === endereco && (c.memo || '') === (memo || ''));
+  if (existente) Object.assign(existente, { nome, endereco, memo: memo || undefined });
+  else l.push({ id: 'c' + Date.now(), nome, rede, rotuloRede: NETWORKS[rede].rotulo, endereco, memo: memo || undefined });
+  writeJson(contatosFile(), l);
+  return true;
+});
+handle('apagarContato', ({ id }) => {
+  writeJson(contatosFile(), (readJson(contatosFile()) || []).filter((c) => c.id !== id));
+  return true;
+});
+
+// ---------- Envios múltiplos / Juntar saldos ----------
+handle('carteirasComSaldo', ({ assetId, minUsd }) => {
+  requireUnlocked();
+  const data = readJson(dataFile());
+  const min = Number(minUsd) || 0;
+  const out = [];
+  for (const w of data.wallets) {
+    const v = saldosMem[w.index] && saldosMem[w.index][assetId];
+    if (!v || v.raw === 0n) continue;
+    const usd = valorUsd(assetId, v.raw, v.decimals);
+    if (min > 0 && (usd == null || usd < min)) continue;
+    out.push({ index: w.index, name: w.name, balance: fmt(v.raw, v.decimals), usd });
+  }
+  return out.sort((a, b) => (b.usd || 0) - (a.usd || 0));
+});
+
+handle('planoJuntar', ({ destino, assetIds, origens, minUsd }) => {
+  requireUnlocked();
+  const data = readJson(dataFile());
+  const min = Number(minUsd) || 0;
+  const out = [];
+  for (const w of data.wallets) {
+    if (w.index === Number(destino)) continue;
+    if (origens && !origens.map(Number).includes(w.index)) continue;
+    for (const a of ASSETS) {
+      if (assetIds && !assetIds.includes(a.id)) continue;
+      const v = saldosMem[w.index] && saldosMem[w.index][a.id];
+      if (!v || v.raw === 0n) continue;
+      const usd = valorUsd(a.id, v.raw, v.decimals);
+      if (min > 0 && (usd == null || usd < min)) continue;
+      let para;
+      try { para = addressFor(Number(destino), a.network); } catch { continue; }
+      out.push({ index: w.index, carteira: w.name, assetId: a.id, symbol: a.symbol, native: !!a.native, rede: NETWORKS[a.network].rotulo, balance: fmt(v.raw, v.decimals), usd, para });
+    }
+  }
+  // tokens primeiro, moedas principais por último (para sobrar taxa para os tokens)
+  return out.sort((x, y) => Number(x.native) - Number(y.native));
+});
+
 // Só no teste automático: monta e assina transações de BTC/LTC/DOGE/BCH com moedas fictícias (não envia nada)
 if (process.env.CARTEIRA_TESTE) {
   handle('testeAssinar', () => {
@@ -845,6 +908,12 @@ app.whenReady().then(() => {
           await t('estimar sol->janio2', async () => c('estimate', { index: 0, assetId: 'sol', to: await dest2('sol'), amount: '0.01', velocidade: 'rapida' }));
           await t('estimar bonk', async () => c('estimate', { index: 0, assetId: 'bonk', to: await dest2('sol'), amount: '1' }));
           await t('assinar utxo', () => c('testeAssinar'));
+          await t('favorito', async () => { await c('salvarContato', { nome: 'Teste Fav', rede: 'tron', endereco: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }); return (await c('contatos', { rede: 'tron' })).map(x => x.nome); });
+          await t('com saldo SOL', () => c('carteirasComSaldo', { assetId: 'sol', minUsd: 1 }));
+          await t('plano juntar', async () => (await c('planoJuntar', { destino: 1, minUsd: 0.5 })).map(i => i.carteira + ':' + i.symbol + ':' + i.balance));
+          await t('tela multiplos', async () => { document.getElementById('btn-multiplos').click(); await new Promise(r => setTimeout(r, 300)); document.getElementById('mm-moeda').value = 'sol'; await carregarMultiplos(); await new Promise(r => setTimeout(r, 1500)); const n = document.querySelectorAll('[data-mm]').length; const op = document.querySelector('.mm-dsel') ? document.querySelector('.mm-dsel').options.length : 0; fecharModal(); return n + ' linhas, ' + op + ' destinos'; });
+          await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
+          await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
           await t('importar frase', async () => (await c('importWallet', { tipo: 'frase', segredo: 'test test test test test test test test test test test junk', name: 'Outra', quantidade: 2 })).map(w => w.name));
           await t('lista final', async () => (await c('wallets')).map(w => w.name + ' ' + w.evmAddress.slice(0, 10) + ' ' + w.tronAddress.slice(0, 6) + (w.importada ? ' (imp)' : '')));

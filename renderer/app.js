@@ -425,8 +425,8 @@ function enviar(assetId) {
     ${m.aviso ? `<p class="alerta">${esc(m.aviso)}</p>` : ''}
     <label>Enviar para (endereço ${tron ? 'Tron, começa com T' : '0x…'})</label>
     <input id="e-para" spellcheck="false" placeholder="${tron ? 'T…' : '0x…'}">
-    ${outras.length ? `<label>…ou escolha uma das suas carteiras</label>
-    <select id="e-minhas"><option value="">— escolher —</option>${outras.map((c) => `<option value="${c.index}">${esc(c.name)}</option>`).join('')}</select>` : ''}
+    <label>…ou escolha uma das suas carteiras ou um favorito</label>
+    <select id="e-minhas"><option value="">carregando…</option></select>
     ${m.memo === 'tag' ? `<label>Tag de destino (número) — obrigatória se o destino for uma corretora</label><input id="e-memo" inputmode="numeric" placeholder="ex.: 123456">` : ''}
     ${m.memo === 'comentario' ? `<label>Comentário / Memo — obrigatório se o destino for uma corretora</label><input id="e-memo" placeholder="ex.: 123456789">` : ''}
     <label>Quantidade de ${esc(m.symbol)}</label>
@@ -436,9 +436,12 @@ function enviar(assetId) {
     <div class="linha" id="e-botoes"><button id="e-cancelar">Cancelar</button><button id="e-calcular" class="primario">Revisar envio</button></div>`);
 
   const sel = $('e-minhas');
-  if (sel) sel.onchange = async () => {
-    if (sel.value === '') return;
-    try { $('e-para').value = (await rpc('receive', { index: Number(sel.value), assetId })).address; } catch (e) { $('e-erro').textContent = e.message; }
+  opcoesDestino(assetId, atual).then((h) => { if (sel) sel.innerHTML = h; });
+  sel.onchange = async () => {
+    try {
+      const d = await resolverDestino(sel.value, assetId);
+      if (d) { $('e-para').value = d.endereco; if ($('e-memo')) $('e-memo').value = d.memo; }
+    } catch (e) { $('e-erro').textContent = e.message; }
     limparResumo();
   };
   $('e-para').oninput = limparResumo;
@@ -472,8 +475,9 @@ function enviar(assetId) {
     try {
       const r = await rpc('estimate', dados());
       const selMinha = $('e-minhas');
+      const opSel = selMinha && selMinha.selectedOptions[0];
       const destino = carteiras.find((c) => c.evmAddress.toLowerCase() === r.to.toLowerCase() || c.tronAddress === r.to)
-        || (selMinha && selMinha.value !== '' ? carteiras.find((c) => c.index === Number(selMinha.value)) : null);
+        || (opSel && opSel.value ? { name: opSel.textContent.trim() } : null);
       const velHtml = r.opcoes ? `<div class="velocidades">${Object.entries(r.opcoes).map(([v, o]) => `
           <label class="vel ${v === r.velocidade ? 'ativa' : ''}"><input type="radio" name="vel" value="${v}" ${v === r.velocidade ? 'checked' : ''}>
             <b>${NOMES_VEL[v]}</b><span>${esc(o.fee)} ${esc(r.feeSymbol)}</span><span class="cinza">${o.usd != null ? '≈ ' + esc(dolar(o.usd)) : ''}</span>
@@ -514,7 +518,11 @@ function enviar(assetId) {
     btn.textContent = $('e-resumo').querySelector('.alerta-rede') ? 'Abastecendo taxa e enviando… (pode levar 1 min)' : 'Enviando…';
     $('e-cancelar').disabled = true;
     try {
+      const memoUsado = $('e-memo') ? $('e-memo').value.trim() : '';
       const r = await rpc('send', dados());
+      const opSel2 = $('e-minhas') && $('e-minhas').value;
+      const ehMinha = (opSel2 && opSel2.startsWith('w:')) || (opSel2 && opSel2.startsWith('c:'))
+        || carteiras.some((c) => c.evmAddress.toLowerCase() === String(r.to).toLowerCase() || c.tronAddress === r.to);
       abrirModal(`
         <h2 class="ok">Envio feito ✓</h2>
         <div class="resumo">
@@ -524,7 +532,18 @@ function enviar(assetId) {
           <div><span class="rot">Código (hash):</span> <code>${esc(r.hash)}</code></div>
         </div>
         <p class="sub">A rede pode levar de alguns segundos a alguns minutos para confirmar. Você recebe um aviso quando confirmar.</p>
+        ${ehMinha ? '' : `<div class="secao"><label>Salvar este endereço como favorito</label>
+          <div class="campo-valor"><input id="f-nome" placeholder="Nome (ex.: Fornecedor João)"><button id="f-salvar">⭐ Salvar</button></div><span id="f-res" class="cinza"></span></div>`}
         <div class="linha"><button id="m-explorer">Ver no explorador</button><button id="m-fechar" class="primario">Fechar</button></div>`);
+      if ($('f-salvar')) {
+        $('f-salvar').onclick = async () => {
+          try {
+            await rpc('salvarContato', { nome: $('f-nome').value, rede: m.network, endereco: r.to, memo: memoUsado });
+            $('f-res').textContent = 'Salvo ✓';
+            $('f-salvar').disabled = true;
+          } catch (e) { $('f-res').textContent = e.message; }
+        };
+      }
       $('m-explorer').onclick = () => rpc('openExternal', { url: r.explorer });
       $('m-fechar').onclick = () => { fecharModal(); rpc('monitorAgora').catch(() => {}); };
     } catch (e) {
@@ -535,6 +554,222 @@ function enviar(assetId) {
     }
   }
 }
+
+// ---------- Destinos: minhas carteiras + favoritos ----------
+async function opcoesDestino(assetId, excluirIndex) {
+  const m = moedas.find((x) => x.id === assetId);
+  let favs = [];
+  try { favs = await rpc('contatos', { rede: m.network }); } catch { /* ok */ }
+  const minhas = carteiras.filter((c) => c.index !== excluirIndex);
+  return `<option value="">— escolher —</option>
+    ${minhas.length ? `<optgroup label="Minhas carteiras">${minhas.map((c) => `<option value="w:${c.index}">${esc(c.name)}</option>`).join('')}</optgroup>` : ''}
+    ${favs.length ? `<optgroup label="Favoritos (${esc(m.rotulo)})">${favs.map((f) => `<option value="c:${esc(f.id)}">⭐ ${esc(f.nome)}</option>`).join('')}</optgroup>` : ''}`;
+}
+
+async function resolverDestino(valor, assetId) {
+  if (!valor) return null;
+  if (valor.startsWith('w:')) return { endereco: (await rpc('receive', { index: Number(valor.slice(2)), assetId })).address, memo: '' };
+  const m = moedas.find((x) => x.id === assetId);
+  const f = (await rpc('contatos', { rede: m.network })).find((x) => x.id === valor.slice(2));
+  return f ? { endereco: f.endereco, memo: f.memo || '', nome: f.nome } : null;
+}
+
+// ---------- Favoritos ----------
+$('btn-contatos').onclick = async () => {
+  const lista = await rpc('contatos', {});
+  abrirModal(`
+    <h2>⭐ Favoritos</h2>
+    ${lista.length ? `<table><thead><tr><th>Nome</th><th>Rede</th><th>Endereço</th><th></th></tr></thead><tbody>
+      ${lista.map((c, i) => `<tr><td><input data-fnome="${i}" value="${esc(c.nome)}"></td><td><span class="tag">${esc(c.rotuloRede || c.rede)}</span></td>
+        <td><code>${esc(c.endereco)}</code>${c.memo ? `<br><small class="cinza">memo/tag: ${esc(c.memo)}</small>` : ''}</td>
+        <td class="botoes"><button class="mini" data-fsalvar="${i}">Salvar</button><button class="mini" data-fapagar="${i}">Apagar</button></td></tr>`).join('')}
+    </tbody></table>` : '<p class="cinza">Nenhum favorito ainda. Depois de um envio, use "Salvar como favorito".</p>'}
+    <div class="linha"><button id="m-fechar" class="primario">Fechar</button></div>`);
+  $('modal').classList.add('largo');
+  $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  for (const b of document.querySelectorAll('[data-fsalvar]')) {
+    b.onclick = async () => {
+      const c = lista[Number(b.dataset.fsalvar)];
+      try { await rpc('salvarContato', { ...c, nome: document.querySelector(`[data-fnome="${b.dataset.fsalvar}"]`).value }); aviso('Favorito salvo'); } catch (e) { aviso(e.message); }
+    };
+  }
+  for (const b of document.querySelectorAll('[data-fapagar]')) {
+    b.onclick = async () => { await rpc('apagarContato', { id: lista[Number(b.dataset.fapagar)].id }); $('btn-contatos').onclick(); };
+  }
+};
+
+// ---------- Envios múltiplos ----------
+$('btn-multiplos').onclick = () => {
+  abrirModal(`
+    <h2>📤 Envios múltiplos</h2>
+    <div class="linha filtros">
+      <select id="mm-moeda">${moedas.map((m) => `<option value="${m.id}">${esc(m.symbol)} — ${esc(m.rotulo)}</option>`).join('')}</select>
+      <label class="inline">Carteiras com mais de US$ <input id="mm-min" type="number" min="0" value="0" class="curto"></label>
+      <button id="mm-buscar" class="primario">Mostrar carteiras</button>
+    </div>
+    <div id="mm-lista"></div>
+    <p id="m-erro" class="erro"></p>
+    <div class="linha" id="mm-botoes"><button id="m-fechar">Fechar</button></div>`);
+  $('modal').classList.add('largo');
+  $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  $('mm-buscar').onclick = carregarMultiplos;
+};
+
+async function carregarMultiplos() {
+  const assetId = $('mm-moeda').value;
+  const m = moedas.find((x) => x.id === assetId);
+  const lista = await rpc('carteirasComSaldo', { assetId, minUsd: $('mm-min').value });
+  const destinos = await opcoesDestino(assetId, null);
+  $('mm-botoes').innerHTML = '<button id="m-fechar">Fechar</button>';
+  $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  if (!lista.length) { $('mm-lista').innerHTML = '<p class="cinza">Nenhuma carteira com esse saldo (os saldos de todas as carteiras são conferidos a cada 1 minuto).</p>'; return; }
+  $('mm-lista').innerHTML = `<table class="multi"><thead><tr><th></th><th>Carteira</th><th class="dir">Saldo</th><th>Destino</th><th>Valor</th><th>Status</th></tr></thead><tbody>
+    ${lista.map((w, i) => `<tr data-mm="${i}">
+      <td><input type="checkbox" class="mm-sel" checked></td>
+      <td><b>${esc(w.name)}</b></td>
+      <td class="dir">${esc(w.balance)} ${esc(m.symbol)}<br><small class="cinza">${esc(dolar(w.usd))}</small></td>
+      <td><select class="mm-dsel">${destinos.replace(`value="w:${w.index}"`, `value="w:${w.index}" disabled`)}</select><input class="mm-dest" placeholder="ou cole o endereço" spellcheck="false">
+        ${m.memo ? `<input class="mm-memo" placeholder="${m.memo === 'tag' ? 'tag (número)' : 'memo'}">` : ''}</td>
+      <td><input class="mm-valor curto" placeholder="0,00"><label class="check mini-check"><input type="checkbox" class="mm-max"> Máx</label></td>
+      <td class="mm-status cinza">—</td>
+    </tr>`).join('')}</tbody></table>
+    <p class="ajuda">Dica: escolha um destino na primeira linha e clique em "Usar em todas".</p>`;
+  $('mm-botoes').innerHTML = `<button id="mm-todas">Usar destino da 1ª linha em todas</button><button id="m-fechar">Fechar</button><button id="mm-revisar" class="primario">Revisar</button>`;
+  $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  const linhas = [...document.querySelectorAll('[data-mm]')];
+  for (const tr of linhas) {
+    const w = lista[Number(tr.dataset.mm)];
+    tr.querySelector('.mm-dsel').onchange = async (ev) => {
+      const d = await resolverDestino(ev.target.value, assetId).catch(() => null);
+      if (d) { tr.querySelector('.mm-dest').value = d.endereco; if (tr.querySelector('.mm-memo')) tr.querySelector('.mm-memo').value = d.memo; }
+    };
+    tr.querySelector('.mm-max').onchange = (ev) => { tr.querySelector('.mm-valor').disabled = ev.target.checked; };
+    tr._w = w;
+  }
+  $('mm-todas').onclick = () => {
+    const p = linhas[0];
+    for (const tr of linhas.slice(1)) {
+      tr.querySelector('.mm-dest').value = p.querySelector('.mm-dest').value;
+      if (tr.querySelector('.mm-memo')) tr.querySelector('.mm-memo').value = p.querySelector('.mm-memo').value;
+    }
+  };
+  const dadosLinha = (tr) => ({
+    index: tr._w.index, assetId, to: tr.querySelector('.mm-dest').value.trim(),
+    amount: tr.querySelector('.mm-valor').value, max: tr.querySelector('.mm-max').checked,
+    memo: tr.querySelector('.mm-memo') ? tr.querySelector('.mm-memo').value.trim() : undefined
+  });
+  $('mm-revisar').onclick = async () => {
+    let total = 0;
+    let totalTaxa = 0;
+    let ok = 0;
+    for (const tr of linhas) {
+      const st = tr.querySelector('.mm-status');
+      if (!tr.querySelector('.mm-sel').checked) { st.textContent = 'pulado'; continue; }
+      st.textContent = 'calculando…';
+      try {
+        const r = await rpc('estimate', dadosLinha(tr));
+        st.innerHTML = `${esc(r.amount)} ${esc(r.symbol)}<br><small>taxa ${esc(r.fee)} ${esc(r.feeSymbol)} ${r.feeUsd != null ? '(' + esc(dolar(r.feeUsd)) + ')' : ''}</small>`;
+        st.classList.remove('erro');
+        tr._ok = true;
+        total += r.amountUsd || 0;
+        totalTaxa += r.feeUsd || 0;
+        ok++;
+      } catch (e) { st.textContent = e.message; st.classList.add('erro'); tr._ok = false; }
+    }
+    $('m-erro').innerHTML = ok ? `<span class="ok">${ok} envio(s) prontos · total ≈ ${esc(dolar(total))} · taxas ≈ ${esc(dolar(totalTaxa))}</span>` : 'Nenhum envio válido.';
+    if (ok && !$('mm-enviar')) {
+      const b = document.createElement('button');
+      b.id = 'mm-enviar';
+      b.className = 'perigo';
+      b.textContent = 'Enviar todos';
+      $('mm-botoes').appendChild(b);
+      b.onclick = async () => {
+        b.disabled = true;
+        $('mm-revisar').disabled = true;
+        for (const tr of linhas) {
+          if (!tr._ok || !tr.querySelector('.mm-sel').checked) continue;
+          const st = tr.querySelector('.mm-status');
+          st.textContent = 'enviando…';
+          try {
+            const r = await rpc('send', dadosLinha(tr));
+            st.innerHTML = `✅ enviado<br><small><code>${esc(String(r.hash).slice(0, 14))}…</code></small>`;
+          } catch (e) { st.textContent = '❌ ' + e.message; st.classList.add('erro'); }
+        }
+        $('m-erro').innerHTML = '<span class="ok">Concluído. Veja os detalhes na aba Atividade.</span>';
+      };
+    }
+  };
+}
+
+// ---------- Juntar saldos ----------
+$('btn-juntar').onclick = () => {
+  const grupos2 = grupos();
+  abrirModal(`
+    <h2>🧲 Juntar saldos</h2>
+    <p class="sub">Puxa o saldo das carteiras escolhidas para uma carteira principal, cada moeda na rede certa.</p>
+    <label>Carteira principal (recebe tudo)</label>
+    <select id="j-destino">${carteiras.map((c) => `<option value="${c.index}" ${c.index === atual ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+    <label>Moedas</label>
+    <div class="chips">${grupos2.map((g) => `<label class="chip"><input type="checkbox" class="j-moeda" value="${esc(g.symbol)}" checked> ${esc(g.symbol)}</label>`).join('')}</div>
+    <label>De quais carteiras</label>
+    <div class="chips">${carteiras.map((c) => `<label class="chip"><input type="checkbox" class="j-origem" value="${c.index}" checked> ${esc(c.name)}</label>`).join('')}</div>
+    <label class="inline">Ignorar valores menores que US$ <input id="j-min" type="number" min="0" value="0.5" step="0.1" class="curto"></label>
+    <div id="j-lista"></div>
+    <p id="m-erro" class="erro"></p>
+    <div class="linha" id="j-botoes"><button id="m-fechar">Fechar</button><button id="j-ver" class="primario">Ver o que vai ser juntado</button></div>`);
+  $('modal').classList.add('largo');
+  $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  $('j-ver').onclick = async () => {
+    const simbolos = [...document.querySelectorAll('.j-moeda:checked')].map((x) => x.value);
+    const assetIds = moedas.filter((m) => simbolos.includes(m.symbol)).map((m) => m.id);
+    const origens = [...document.querySelectorAll('.j-origem:checked')].map((x) => Number(x.value));
+    const destino = Number($('j-destino').value);
+    const itens = await rpc('planoJuntar', { destino, assetIds, origens, minUsd: $('j-min').value });
+    if (!itens.length) { $('j-lista').innerHTML = '<p class="cinza">Nada para juntar com esses filtros.</p>'; return; }
+    $('j-lista').innerHTML = `<table><thead><tr><th>De</th><th>Moeda</th><th class="dir">Saldo</th><th>Situação</th></tr></thead><tbody>
+      ${itens.map((it, i) => `<tr data-j="${i}"><td>${esc(it.carteira)}</td><td><b>${esc(it.symbol)}</b> <span class="cinza">${esc(it.rede)}</span></td>
+        <td class="dir">${esc(it.balance)}<br><small class="cinza">${esc(dolar(it.usd))}</small></td><td class="j-st cinza">calculando…</td></tr>`).join('')}</tbody></table>`;
+    let ok = 0;
+    let soma = 0;
+    let taxas = 0;
+    for (const [i, it] of itens.entries()) {
+      const st = document.querySelector(`[data-j="${i}"] .j-st`);
+      try {
+        const r = await rpc('estimate', { index: it.index, assetId: it.assetId, to: it.para, max: true });
+        const taxaUsd = (r.feeUsd || 0) + (r.abastecer ? (r.abastecer.usd || 0) + (r.abastecer.taxaAbastecerUsd || 0) : 0);
+        if (it.usd != null && taxaUsd > it.usd * 0.5) { st.textContent = `pulado: taxa (${dolar(taxaUsd)}) alta demais para o valor`; it._ok = false; continue; }
+        st.innerHTML = `ok · taxa ≈ ${esc(dolar(taxaUsd))}${r.abastecer ? ' (usa carteira de taxas)' : ''}`;
+        st.classList.remove('cinza');
+        it._ok = true;
+        ok++;
+        soma += it.usd || 0;
+        taxas += taxaUsd;
+      } catch (e) { st.textContent = e.message; st.classList.add('erro'); it._ok = false; }
+    }
+    $('m-erro').innerHTML = ok ? `<span class="ok">${ok} envio(s) · total ≈ ${esc(dolar(soma))} · taxas ≈ ${esc(dolar(taxas))}</span>` : 'Nada pode ser juntado agora.';
+    if (ok && !$('j-ir')) {
+      const b = document.createElement('button');
+      b.id = 'j-ir';
+      b.className = 'perigo';
+      b.textContent = 'Juntar agora';
+      $('j-botoes').appendChild(b);
+      b.onclick = async () => {
+        b.disabled = true;
+        $('j-ver').disabled = true;
+        for (const [i, it] of itens.entries()) {
+          if (!it._ok) continue;
+          const st = document.querySelector(`[data-j="${i}"] .j-st`);
+          st.textContent = 'enviando…';
+          try {
+            await rpc('send', { index: it.index, assetId: it.assetId, to: it.para, max: true });
+            st.textContent = '✅ enviado';
+          } catch (e) { st.textContent = '❌ ' + e.message; st.classList.add('erro'); }
+        }
+        $('m-erro').innerHTML = '<span class="ok">Concluído. Veja os detalhes na aba Atividade.</span>';
+      };
+    }
+  };
+};
 
 // ---------- Mercado ----------
 let mercadoTimer = null;

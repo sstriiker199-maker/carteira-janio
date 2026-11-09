@@ -130,3 +130,13 @@ table.mercado td, table.mercado th { padding: 7px 8px; }
 .ativ-corpo { flex: 1; min-width: 0; }
 .ativ-det { color: #9aa1b1; font-size: 13px; margin-top: 3px; word-break: break-all; }
 #at-lista { max-height: 60vh; overflow-y: auto; }
+
+label.inline { display: flex; align-items: center; gap: 6px; margin: 0; color: #e7e9ee; }
+input.curto { width: 90px; margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: #232733; border-radius: 14px; padding: 4px 10px; margin: 0; color: #e7e9ee; cursor: pointer; }
+.chip input { width: auto; margin: 0; }
+table.multi td { vertical-align: top; }
+table.multi input, table.multi select { margin-bottom: 4px; padding: 6px 8px; }
+.mini-check { margin: 2px 0 0; font-size: 12px; }
+#modal.largo { max-width: 96vw; }
