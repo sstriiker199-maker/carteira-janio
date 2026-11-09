@@ -24,7 +24,8 @@ jobs:
         run: |
           sudo apt-get install -y xvfb >/dev/null 2>&1 || true
           timeout 180 xvfb-run -a npx electron . --no-sandbox > saida.txt 2>&1 || true
-          grep -E '^LOG|Error|error' saida.txt | head -60 | while IFS= read -r line; do
-            echo "::warning::$(printf '%s' "$line" | cut -c1-400)"
-          done
+          grep '^LOG' saida.txt | cut -c30-330 > logs.txt || true
+          grep -iE 'error' saida.txt | grep -v '^LOG' | head -5 >> logs.txt || true
+          split -l 8 logs.txt parte_
+          for f in parte_*; do echo "::warning::$(sed ':a;N;$!ba;s/\n/%0A/g' "$f")"; done
           grep -q 'tela visível: tela-' saida.txt
