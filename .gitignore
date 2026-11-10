@@ -3,3 +3,4 @@ dist/
 *.log
 renderer/icons/
 renderer/fonts/
+renderer/vendor/

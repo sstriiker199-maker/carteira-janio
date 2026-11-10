@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, clipboard, dialog } = require('electron');
 const alertas = require('./src/alertas');
 const path = require('path');
 const fs = require('fs');
@@ -1535,6 +1535,106 @@ async function runTransfer(mode, { index, assetId, to, amount, max, velocidade, 
 handle('estimate', (arg) => runTransfer('estimate', arg));
 handle('send', (arg) => runTransfer('send', arg));
 
+// ---------- Autenticador (códigos 2FA) ----------
+// As chaves ficam cifradas com a senha da carteira e nunca vão para a tela: a tela só recebe o código.
+const totp = require('./src/totp');
+const autFile = () => path.join(dataDir(), 'autenticador.json');
+function autContas() {
+  requireUnlocked();
+  if (!session.aut) {
+    const f = readJson(autFile());
+    session.aut = f && f.box ? JSON.parse(vault.decrypt(f.box, session.senha)) : [];
+  }
+  return session.aut;
+}
+function autSalvar() {
+  const antigo = readJson(autFile());
+  if (antigo) { try { fs.copyFileSync(autFile(), autFile().replace('.json', '.backup.json')); } catch { /* ok */ } }
+  fs.writeFileSync(autFile(), JSON.stringify({ v: 1, box: vault.encrypt(JSON.stringify(session.aut), session.senha) }));
+}
+function autAdicionarLista(novas) {
+  const lista = autContas();
+  let adicionadas = 0;
+  let repetidas = 0;
+  for (const c of novas) {
+    if (lista.some((x) => x.segredo === c.segredo)) { repetidas++; continue; }
+    lista.push({ ...c, id: require('crypto').randomUUID(), criado: Date.now() });
+    adicionadas++;
+  }
+  if (adicionadas) autSalvar();
+  return { adicionadas, repetidas };
+}
+const conferirSenha = (password) => { vault.decrypt(readJson(dataFile()).vault, password); };
+
+handle('autLista', () => {
+  const agora = Date.now();
+  return autContas().map((c) => ({ id: c.id, nome: c.nome, emissor: c.emissor, digitos: c.digitos, ...totp.codigo(c, agora) }));
+});
+handle('autAdicionar', ({ segredo, nome, emissor, digitos, algo, periodo }) => {
+  const c = totp.normalizar({ segredo, nome, emissor, digitos, algo, periodo });
+  const r = autAdicionarLista([c]);
+  if (!r.adicionadas) throw new Error('Essa conta já está no autenticador.');
+  return r;
+});
+// textos lidos de QR Codes: otpauth://… (uma conta) ou otpauth-migration://… (exportação do Google)
+handle('autImportar', ({ textos }) => {
+  const contas = [];
+  const pulados = [];
+  const lotes = [];
+  const erros = [];
+  for (const t of [].concat(textos || [])) {
+    try {
+      if (/^otpauth-migration:/i.test(t)) {
+        const m = totp.lerMigracao(t);
+        contas.push(...m.contas); pulados.push(...m.pulados); lotes.push(m.lote);
+      } else if (/^otpauth:/i.test(t)) contas.push(totp.lerUri(t));
+      else erros.push('QR Code não é de autenticador');
+    } catch (e) { erros.push(e.message); }
+  }
+  if (!contas.length && erros.length) throw new Error(erros[0]);
+  return { ...autAdicionarLista(contas), lidas: contas.length, pulados, lotes, erros };
+});
+handle('autEditar', ({ id, nome, emissor }) => {
+  const c = autContas().find((x) => x.id === id);
+  if (!c) throw new Error('Conta não encontrada.');
+  c.nome = String(nome || '').trim().slice(0, 120) || c.nome;
+  c.emissor = String(emissor || '').trim().slice(0, 80);
+  autSalvar();
+  return true;
+});
+handle('autRemover', ({ id, password }) => {
+  conferirSenha(password);
+  session.aut = autContas().filter((x) => x.id !== id);
+  autSalvar();
+  return true;
+});
+// mostrar o QR de uma conta para passar para o celular (pede a senha)
+handle('autQr', async ({ id, password }) => {
+  conferirSenha(password);
+  const c = autContas().find((x) => x.id === id);
+  if (!c) throw new Error('Conta não encontrada.');
+  const uri = totp.criarUri(c);
+  return { qr: await QRCode.toDataURL(uri, { margin: 1, width: 260 }), segredo: c.segredo.replace(/(.{4})/g, '$1 ').trim() };
+});
+// backup cifrado (abre só com a senha que você usou para criar)
+handle('autBackup', async ({ password }) => {
+  conferirSenha(password);
+  const r = await dialog.showSaveDialog(win, { title: 'Salvar backup do autenticador', defaultPath: `autenticador-backup-${new Date().toISOString().slice(0, 10)}.wpauth`, filters: [{ name: 'Backup do autenticador', extensions: ['wpauth'] }] });
+  if (r.canceled || !r.filePath) return { salvo: false };
+  fs.writeFileSync(r.filePath, JSON.stringify({ tipo: 'wallet-pessoal-autenticador', v: 1, box: vault.encrypt(JSON.stringify(autContas()), password) }));
+  return { salvo: true, arquivo: r.filePath, contas: autContas().length };
+});
+handle('autRestaurar', async ({ password }) => {
+  requireUnlocked();
+  const r = await dialog.showOpenDialog(win, { title: 'Abrir backup do autenticador', properties: ['openFile'], filters: [{ name: 'Backup do autenticador', extensions: ['wpauth', 'json'] }] });
+  if (r.canceled || !r.filePaths[0]) return { cancelado: true };
+  const f = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8'));
+  if (f.tipo !== 'wallet-pessoal-autenticador' || !f.box) throw new Error('Esse arquivo não é um backup do autenticador.');
+  let contas;
+  try { contas = JSON.parse(vault.decrypt(f.box, password)); } catch { throw new Error('Senha errada para esse backup (use a senha que a carteira tinha quando o backup foi feito).'); }
+  return autAdicionarLista(contas.map((c) => totp.normalizar(c)));
+});
+
 handle('revealPhrase', ({ password }) => {
   const data = readJson(dataFile());
   return vault.decrypt(data.vault, password);
@@ -1748,6 +1848,16 @@ app.whenReady().then(() => {
           }
           await t('tela pares', async () => { await abrirPares('ton'); await new Promise(r => setTimeout(r, 6000)); const n = document.querySelectorAll('#p-lista tbody tr').length; fecharModal(); return n + ' linhas'; });
           await t('andamento', () => c('testeAndamento'));
+          await t('aut manual', () => c('autAdicionar', { segredo: 'JBSW Y3DP EHPK 3PXP', nome: 'teste', emissor: 'Site' }).catch(e => e.message));
+          await t('aut google', async () => { const r = await c('autImportar', { textos: ['otpauth-migration://offline?data=CikKCkhlbGxvId6tvu8SDXBpeGVsdmF1bHQyNDcaBlR3aXRjaCABKAEwAgoyChQxMjM0NTY3ODkwMTIzNDU2Nzg5MBIMZXVAZ21haWwuY29tGgZHb29nbGUgASgBMAIKMgoUYWJjZGVmZ2hpamtsbW5vcHFyc3QSDHNzdHJpaWtlcjE5ORoGR2l0SHViIAEoATACEAEYASAAKE0%3D'] }); return r.adicionadas + ' novas, ' + r.repetidas + ' repetidas, lote ' + JSON.stringify(r.lotes); });
+          await t('aut lista', async () => (await c('autLista')).map(x => x.emissor + ':' + x.nome + '=' + x.codigo.length + 'dig ' + x.resta + 's').join(' ; '));
+          await t('aut jsQR', async () => {
+            const r = await c('receive', { index: 0, assetId: 'btc' });
+            const img = new Image(); await new Promise((ok) => { img.onload = ok; img.src = r.qr; });
+            const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height; const x = cv.getContext('2d'); x.drawImage(img, 0, 0);
+            const d = x.getImageData(0, 0, cv.width, cv.height); const q = window.jsQR(d.data, d.width, d.height);
+            return (q && q.data === r.address) ? 'QR lido certo' : 'falhou: ' + (q && q.data);
+          });
           await t('assinar utxo', () => c('testeAssinar'));
           await t('favorito vinculado', async () => { await c('salvarContato', { nome: 'Corretora XRP', rede: 'xrp', endereco: 'rHsMGQEkVNJmpGWs8XUBoTBiAAbwxZN5v3', memo: '555', carteira: 0 }); return (await c('contatos', { rede: 'xrp' })).map(x => x.nome + ' tag ' + x.memo + ' carteira ' + x.carteira); });
           await t('dois favoritos mesmo endereco', async () => { await c('salvarContato', { novo: true, nome: 'Dest A', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 0 }); await c('salvarContato', { novo: true, nome: 'Dest B', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 1 }); return (await c('contatos', { rede: 'solana' })).map(x => x.nome); });
@@ -1815,6 +1925,8 @@ app.whenReady().then(() => {
         await foto('4-favoritos', "fecharModal(); document.getElementById('btn-contatos').onclick(); true", 3000);
         await foto('5-config', "fecharModal(); document.getElementById('btn-config').onclick(); true", 2000);
         await foto('6-mercado', "fecharModal(); document.getElementById('btn-mercado').onclick(); true", 4000);
+        await foto('8-autenticador', "fecharModal(); abrirAutenticador(); true", 2500);
+        await foto('9-aut-google', "autGoogleTela(); true", 1500);
         await foto('7-bloqueio', "fecharModal(); telaBloqueada('🔒 Bloqueada automaticamente após 15 min sem uso. Digite a senha para continuar.'); true", 1200);
       } catch (e) { log('[teste] erro: ' + e.message); }
       app.quit();

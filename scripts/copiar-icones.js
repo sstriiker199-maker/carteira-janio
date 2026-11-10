@@ -69,3 +69,12 @@ const TOKENS = {
     }
   }
 })();
+
+// Leitor de QR Code (usado no Autenticador)
+try {
+  const origem = path.join(path.dirname(require.resolve('jsqr/package.json')), 'dist', 'jsQR.js');
+  const destino = path.join(__dirname, '..', 'renderer', 'vendor');
+  fs.mkdirSync(destino, { recursive: true });
+  fs.copyFileSync(origem, path.join(destino, 'jsQR.js'));
+  console.log('Leitor de QR copiado');
+} catch (e) { console.log('Sem leitor de QR: ' + e.message); }

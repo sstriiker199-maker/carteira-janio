@@ -31,7 +31,8 @@
     "@ton/crypto": "^3.3.0",
     "@emurgo/cardano-serialization-lib-nodejs": "^12.1.1",
     "@ston-fi/sdk": "^2.7.0",
-    "@ston-fi/api": "^0.33.0"
+    "@ston-fi/api": "^0.33.0",
+    "jsqr": "^1.4.0"
   },
   "devDependencies": {
     "electron": "^37.0.0",
