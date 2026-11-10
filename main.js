@@ -654,7 +654,8 @@ handle('resumoTaxas', () => {
     if (usd) total += usd;
     return { symbol: a.symbol, balance: fmt(v.raw, v.decimals, 4), usd, baixo: usd != null && usd < MINIMO_TAXA_USD[id] };
   });
-  return { index: w.index, name: w.name, total, moedas: moedasT };
+  const geral = (resumo().find((x) => x.index === w.index) || {}).totalUsd;
+  return { index: w.index, name: w.name, total, totalCarteira: geral, moedas: moedasT };
 });
 handle('definirCarteiraTaxas', ({ index }) => {
   const atual = readJson(cfgFile()) || {};

@@ -136,7 +136,8 @@ async function mostrarTanque() {
   }
   const baixos = t.moedas.filter((m) => m.baixo).map((m) => m.symbol);
   box.innerHTML = `
-    <div class="tq-topo"><b>⛽ ${esc(t.name)}</b><span class="li-total">${esc(dolar(t.total))}</span></div>
+    <div class="tq-topo"><b>⛽ ${esc(t.name)}</b><span class="li-total">${esc(dolar(t.totalCarteira != null ? t.totalCarteira : t.total))}</span></div>
+    <div class="tq-moedas">para taxas: <b>${esc(dolar(t.total))}</b></div>
     <div class="tq-moedas">${t.moedas.map((m) => `<span class="${m.baixo ? 'baixo' : ''}">${esc(m.symbol)} ${esc(m.balance)}</span>`).join(' · ')}</div>
     ${baixos.length ? `<div class="tq-aviso">⚠️ ${esc(baixos.join(', '))} acabando</div>` : ''}`;
   box.classList.toggle('ativa', atual === t.index);
