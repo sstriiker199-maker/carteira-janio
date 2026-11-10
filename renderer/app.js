@@ -496,7 +496,16 @@ function enviar(assetId) {
     <div class="linha" id="e-botoes"><button id="e-cancelar">Cancelar</button><button id="e-calcular" class="primario">Revisar envio</button></div>`);
 
   const sel = $('e-minhas');
-  opcoesDestino(assetId, atual).then((h) => { if (sel) sel.innerHTML = h; });
+  opcoesDestino(assetId, atual).then(async (h) => {
+    if (sel) sel.innerHTML = h;
+    const fav = await favoritoVinculado(assetId, atual);
+    if (fav && !$('e-para').value) {
+      sel.value = 'c:' + fav.id;
+      $('e-para').value = fav.endereco;
+      if ($('e-memo') && fav.memo) $('e-memo').value = fav.memo;
+      $('e-para').oninput();
+    }
+  });
   sel.onchange = async () => {
     try {
       const d = await resolverDestino(sel.value, assetId);
@@ -720,27 +729,81 @@ $('btn-trocar').onclick = () => {
 
 // ---------- Favoritos ----------
 $('btn-contatos').onclick = async () => {
-  const lista = await rpc('contatos', {});
+  const [lista, redes] = await Promise.all([rpc('contatos', {}), rpc('redes')]);
+  const opCarteiras = (sel) => `<option value="">— nenhuma —</option>${carteiras.map((c) => `<option value="${c.index}" ${sel === c.index ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}`;
   abrirModal(`
     <h2>⭐ Favoritos</h2>
-    ${lista.length ? `<table><thead><tr><th>Nome</th><th>Rede</th><th>Endereço</th><th></th></tr></thead><tbody>
-      ${lista.map((c, i) => `<tr><td><input data-fnome="${i}" value="${esc(c.nome)}"></td><td><span class="tag">${esc(c.rotuloRede || c.rede)}</span></td>
-        <td><code>${esc(c.endereco)}</code>${c.memo ? `<br><small class="cinza">memo/tag: ${esc(c.memo)}</small>` : ''}</td>
-        <td class="botoes"><button class="mini" data-fsalvar="${i}">Salvar</button><button class="mini" data-fapagar="${i}">Apagar</button></td></tr>`).join('')}
-    </tbody></table>` : '<p class="cinza">Nenhum favorito ainda. Depois de um envio, use "Salvar como favorito".</p>'}
+    <div class="secao novo-fav">
+      <h3>+ Novo favorito</h3>
+      <div class="grade2">
+        <div><label>Nome</label><input id="nf-nome" placeholder="ex.: Binance do João"></div>
+        <div><label>Rede</label><select id="nf-rede">${redes.map((r) => `<option value="${r.id}">${esc(r.rotulo)}</option>`).join('')}</select></div>
+      </div>
+      <label>Endereço</label>
+      <input id="nf-end" placeholder="Cole o endereço" spellcheck="false">
+      <div id="nf-verif" class="verif"></div>
+      <div id="nf-memo-box" class="hidden"><label id="nf-memo-rot">Tag / Memo</label><input id="nf-memo" placeholder="opcional (obrigatório se for corretora)"></div>
+      <label>Vincular a uma das minhas carteiras (opcional)</label>
+      <select id="nf-carteira">${opCarteiras(null)}</select>
+      <p class="ajuda">Se vincular, esse favorito já vem preenchido quando essa carteira for enviar nessa rede (no Enviar e no Envios múltiplos).</p>
+      <button id="nf-salvar" class="primario">⭐ Salvar favorito</button> <span id="nf-res" class="cinza"></span>
+    </div>
+    <div class="secao">
+      <h3>Meus favoritos</h3>
+      ${lista.length ? `<table><thead><tr><th>Nome</th><th>Rede</th><th>Endereço</th><th>Vinculado a</th><th></th></tr></thead><tbody>
+        ${lista.map((c, i) => `<tr><td><input data-fnome="${i}" value="${esc(c.nome)}"></td><td><span class="tag">${esc(c.rotuloRede || c.rede)}</span></td>
+          <td><code>${esc(c.endereco)}</code>${c.memo ? `<br><small class="cinza">tag/memo: ${esc(c.memo)}</small>` : ''}</td>
+          <td><select data-fvinc="${i}">${opCarteiras(c.carteira)}</select></td>
+          <td class="botoes"><button class="mini" data-fsalvar="${i}">Salvar</button><button class="mini" data-fapagar="${i}">Apagar</button></td></tr>`).join('')}
+      </tbody></table>` : '<p class="cinza">Nenhum favorito ainda.</p>'}
+    </div>
     <div class="linha"><button id="m-fechar" class="primario">Fechar</button></div>`);
   $('modal').classList.add('largo');
   $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+
+  const redeSel = () => redes.find((r) => r.id === $('nf-rede').value);
+  const ajustarMemo = () => {
+    const r = redeSel();
+    $('nf-memo-box').classList.toggle('hidden', !r.memo);
+    $('nf-memo-rot').textContent = r.memo === 'tag' ? 'Tag de destino (número)' : 'Memo / Comentário';
+  };
+  let tv = null;
+  const verificarNovo = async () => {
+    const v = await rpc('verificarEndereco', { assetId: redeSel().assetId, endereco: $('nf-end').value }).catch(() => ({ estado: 'vazio' }));
+    $('nf-verif').className = 'verif ' + v.estado;
+    $('nf-verif').textContent = v.estado === 'vazio' ? '' : (v.estado === 'ok' ? '✅ ' : v.estado === 'atencao' ? '⚠️ ' : '❌ ') + v.mensagem.replace(/mas você está enviando .*? pela rede/, 'mas você escolheu a rede').replace('Envio bloqueado: o dinheiro seria perdido.', '');
+    $('nf-salvar').disabled = v.estado === 'bloqueado';
+  };
+  $('nf-rede').onchange = () => { ajustarMemo(); verificarNovo(); };
+  $('nf-end').oninput = () => { clearTimeout(tv); tv = setTimeout(verificarNovo, 300); };
+  ajustarMemo();
+  $('nf-salvar').onclick = async () => {
+    try {
+      await rpc('salvarContato', { nome: $('nf-nome').value, rede: $('nf-rede').value, endereco: $('nf-end').value.trim(), memo: $('nf-memo').value.trim() || undefined, carteira: $('nf-carteira').value });
+      aviso('Favorito salvo');
+      $('btn-contatos').onclick();
+    } catch (e) { $('nf-res').textContent = e.message; }
+  };
   for (const b of document.querySelectorAll('[data-fsalvar]')) {
     b.onclick = async () => {
-      const c = lista[Number(b.dataset.fsalvar)];
-      try { await rpc('salvarContato', { ...c, nome: document.querySelector(`[data-fnome="${b.dataset.fsalvar}"]`).value }); aviso('Favorito salvo'); } catch (e) { aviso(e.message); }
+      const i = b.dataset.fsalvar;
+      const c = lista[Number(i)];
+      try {
+        await rpc('salvarContato', { ...c, nome: document.querySelector(`[data-fnome="${i}"]`).value, carteira: document.querySelector(`[data-fvinc="${i}"]`).value });
+        aviso('Favorito salvo');
+      } catch (e) { aviso(e.message); }
     };
   }
   for (const b of document.querySelectorAll('[data-fapagar]')) {
     b.onclick = async () => { await rpc('apagarContato', { id: lista[Number(b.dataset.fapagar)].id }); $('btn-contatos').onclick(); };
   }
 };
+
+// favorito vinculado a esta carteira nesta rede (para já vir preenchido)
+async function favoritoVinculado(assetId, index) {
+  const m = moedas.find((x) => x.id === assetId);
+  try { return (await rpc('contatos', { rede: m.network })).find((f) => f.carteira === index) || null; } catch { return null; }
+}
 
 // ---------- Envios múltiplos ----------
 $('btn-multiplos').onclick = () => {
@@ -788,6 +851,13 @@ async function carregarMultiplos() {
       if (d) { tr.querySelector('.mm-dest').value = d.endereco; if (tr.querySelector('.mm-memo')) tr.querySelector('.mm-memo').value = d.memo; tr.querySelector('.mm-dest').onblur(); }
     };
     tr.querySelector('.mm-max').onchange = (ev) => { tr.querySelector('.mm-valor').disabled = ev.target.checked; };
+    favoritoVinculado(assetId, w.index).then((fav) => {
+      if (!fav || tr.querySelector('.mm-dest').value) return;
+      tr.querySelector('.mm-dsel').value = 'c:' + fav.id;
+      tr.querySelector('.mm-dest').value = fav.endereco;
+      if (tr.querySelector('.mm-memo') && fav.memo) tr.querySelector('.mm-memo').value = fav.memo;
+      if (tr.querySelector('.mm-dest').onblur) tr.querySelector('.mm-dest').onblur();
+    });
     const verifLinha = async () => {
       const r = await rpc('verificarEndereco', { assetId, endereco: tr.querySelector('.mm-dest').value }).catch(() => ({ estado: 'vazio' }));
       const st = tr.querySelector('.mm-status');

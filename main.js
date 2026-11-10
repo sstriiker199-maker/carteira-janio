@@ -750,19 +750,23 @@ handle('contatos', ({ rede }) => {
   const l = readJson(contatosFile()) || [];
   return rede ? l.filter((c) => c.rede === rede) : l;
 });
-handle('salvarContato', ({ id, nome, rede, endereco, memo }) => {
+handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira }) => {
   nome = String(nome || '').trim();
   endereco = String(endereco || '').trim();
   if (!nome) throw new Error('Dê um nome para o favorito.');
   if (!endereco) throw new Error('Endereço vazio.');
   if (!NETWORKS[rede]) throw new Error('Rede inválida.');
+  if (!enderecoValidoPara(NETWORKS[rede], endereco)) throw new Error(`Esse endereço não é da rede ${NETWORKS[rede].rotulo}. Confira antes de salvar.`);
+  const vinc = carteira === '' || carteira == null ? undefined : Number(carteira);
   const l = readJson(contatosFile()) || [];
   const existente = id ? l.find((c) => c.id === id) : l.find((c) => c.rede === rede && c.endereco === endereco && (c.memo || '') === (memo || ''));
-  if (existente) Object.assign(existente, { nome, endereco, memo: memo || undefined });
-  else l.push({ id: 'c' + Date.now(), nome, rede, rotuloRede: NETWORKS[rede].rotulo, endereco, memo: memo || undefined });
+  if (existente) Object.assign(existente, { nome, endereco, memo: memo || undefined, carteira: carteira === undefined ? existente.carteira : vinc });
+  else l.push({ id: 'c' + Date.now(), nome, rede, rotuloRede: NETWORKS[rede].rotulo, endereco, memo: memo || undefined, carteira: vinc });
   writeJson(contatosFile(), l);
   return true;
 });
+handle('redes', () => Object.values(NETWORKS).map((n) => ({ id: n.id, rotulo: n.rotulo, memo: n.memo || null, assetId: ASSETS.find((a) => a.network === n.id).id })));
+
 handle('apagarContato', ({ id }) => {
   writeJson(contatosFile(), (readJson(contatosFile()) || []).filter((c) => c.id !== id));
   return true;
@@ -1237,6 +1241,9 @@ app.whenReady().then(() => {
           await t('estimar sol->janio2', async () => c('estimate', { index: 0, assetId: 'sol', to: await dest2('sol'), amount: '0.01', velocidade: 'rapida' }));
           await t('estimar bonk', async () => c('estimate', { index: 0, assetId: 'bonk', to: await dest2('sol'), amount: '1' }));
           await t('assinar utxo', () => c('testeAssinar'));
+          await t('favorito vinculado', async () => { await c('salvarContato', { nome: 'Corretora XRP', rede: 'xrp', endereco: 'rHsMGQEkVNJmpGWs8XUBoTBiAAbwxZN5v3', memo: '555', carteira: 0 }); return (await c('contatos', { rede: 'xrp' })).map(x => x.nome + ' tag ' + x.memo + ' carteira ' + x.carteira); });
+          await t('favorito rede errada', () => c('salvarContato', { nome: 'X', rede: 'solana', endereco: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }));
+          await t('tela favoritos nova', async () => { await document.getElementById('btn-contatos').onclick(); const ok = !!document.getElementById('nf-rede'); fecharModal(); return ok ? 'formulario ok' : 'sem formulario'; });
           await t('favorito', async () => { await c('salvarContato', { nome: 'Teste Fav', rede: 'tron', endereco: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }); return (await c('contatos', { rede: 'tron' })).map(x => x.nome); });
           await t('com saldo SOL', () => c('carteirasComSaldo', { assetId: 'sol', minUsd: 1 }));
           await t('plano juntar', async () => (await c('planoJuntar', { destino: 1, minUsd: 0.5 })).map(i => i.carteira + ':' + i.symbol + ':' + i.balance));
