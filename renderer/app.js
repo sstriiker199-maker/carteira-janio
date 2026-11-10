@@ -686,7 +686,7 @@ const RESERVA = { ETH: 0.0005, BNB: 0.0005, POL: 0.05, AVAX: 0.005, TRX: 2, BTC:
 $('btn-trocar').onclick = () => {
   const comSaldo = moedas.filter((m) => saldos[m.id] && !saldos[m.id].zero && !saldos[m.id].erro && !saldos[m.id].indisponivel);
   if (!comSaldo.length) { aviso('Esta carteira não tem saldo para trocar.'); return; }
-  const opDe = opcoesMoedas(comSaldo, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)} (saldo ${esc(saldos[m.id].balance)})`);
+  const opDe = opcoesMoedas(comSaldo, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)} (saldo ${esc(saldos[m.id].balance)}${saldos[m.id].usd != null ? ' ≈ ' + esc(dolar(saldos[m.id].usd)) : ''})`);
   const opPara = opcoesMoedas(moedas, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)}`);
   abrirModal(`
     <h2>🔄 Trocar moedas</h2>
