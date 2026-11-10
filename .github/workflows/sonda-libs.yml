@@ -1,0 +1,23 @@
+name: Sonda de bibliotecas
+on:
+  push:
+    branches: [main]
+    paths: ['.github/sondas/libs/**', '.github/workflows/sonda-libs.yml']
+  workflow_dispatch:
+jobs:
+  sondar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Rodar
+        shell: bash
+        working-directory: .github/sondas/libs
+        run: |
+          npm install > npm.log 2>&1 || { tail -20 npm.log | while IFS= read -r l; do echo "::error::$l"; done; exit 1; }
+          timeout 240 node sonda.js > saida.txt 2>&1 || true
+          cut -c1-900 saida.txt > s2.txt
+          split -l 3 s2.txt p_
+          for f in p_*; do echo "::warning::$(sed ':a;N;$!ba;s/\n/%0A/g' "$f")"; done
