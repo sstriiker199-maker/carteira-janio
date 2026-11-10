@@ -316,3 +316,11 @@ details.ajuda summary { cursor: pointer; }
 .aut-nome { white-space: normal; word-break: break-all; }
 .verif-dica { display: block; color: var(--mut); font-size: 12px; margin-top: 3px; }
 .verif.ok { font-weight: 500; }
+.aut-barra-sel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; padding: 10px 12px; border: 1px solid var(--linha2); border-radius: 14px; background: var(--ouro-fundo); }
+.aut-barra-sel #aut-sel-n { color: var(--ouro); font-weight: 500; }
+.aut-esp { flex: 1; }
+.aut-card.selecionando { cursor: pointer; padding-left: 44px; }
+.aut-card.selecionando .aut-menu { display: none; }
+.aut-card.marcada { border-color: var(--ouro); background: var(--ouro-fundo); }
+.aut-check { position: absolute; left: 14px; top: 16px; width: 18px; height: 18px; margin: 0; pointer-events: none; }
+.aut-remover-lista { max-height: 180px; overflow-y: auto; margin: 0 0 12px; font-size: 13px; color: var(--mut); }

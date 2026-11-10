@@ -1609,6 +1609,14 @@ handle('autRemover', ({ id, password }) => {
   autSalvar();
   return true;
 });
+handle('autRemoverVarias', ({ ids, password }) => {
+  conferirSenha(password);
+  const tirar = new Set([].concat(ids || []));
+  const antes = autContas().length;
+  session.aut = autContas().filter((x) => !tirar.has(x.id));
+  autSalvar();
+  return { removidas: antes - session.aut.length };
+});
 // mostrar o QR de uma conta para passar para o celular (pede a senha)
 handle('autQr', async ({ id, password }) => {
   conferirSenha(password);
@@ -1928,6 +1936,7 @@ app.whenReady().then(() => {
         await foto('6-mercado', "fecharModal(); document.getElementById('btn-mercado').onclick(); true", 4000);
         await foto('8-autenticador', "fecharModal(); abrirAutenticador(); true", 2500);
         await foto('9-aut-google', "autGoogleTela(); true", 1500);
+        await foto('10-aut-selecionar', "abrirAutenticador().then(() => { document.getElementById('aut-sel').click(); setTimeout(() => document.querySelector('.aut-card').click(), 300); }); true", 2500);
         await foto('7-bloqueio', "fecharModal(); telaBloqueada('🔒 Bloqueada automaticamente após 15 min sem uso. Digite a senha para continuar.'); true", 1200);
       } catch (e) { log('[teste] erro: ' + e.message); }
       app.quit();

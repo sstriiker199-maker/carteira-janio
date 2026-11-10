@@ -4,6 +4,8 @@
 let autTimer = null;
 let autCamera = null;
 let autFiltro = '';
+let autSelecionando = false;
+const autSel = new Set();
 
 function autParar() {
   clearInterval(autTimer); autTimer = null;
@@ -23,8 +25,17 @@ async function abrirAutenticador() {
       <div class="linha aut-acoes">
         <button id="aut-add" class="primario">+ Adicionar conta</button>
         <button id="aut-google">Importar do Google Authenticator</button>
+        <button id="aut-sel">Selecionar</button>
         <button id="aut-bk">Backup</button>
       </div>
+    </div>
+    <div id="aut-barra-sel" class="aut-barra-sel hidden">
+      <span id="aut-sel-n">0 selecionadas</span>
+      <button id="aut-sel-todas" class="mini">Selecionar todas</button>
+      <button id="aut-sel-nenhuma" class="mini">Limpar</button>
+      <span class="aut-esp"></span>
+      <button id="aut-sel-remover" class="perigo-borda" disabled>Remover selecionadas</button>
+      <button id="aut-sel-sair">Cancelar</button>
     </div>
     <p class="sub">Códigos de verificação em duas etapas (2FA). As chaves ficam cifradas com a senha da carteira e somem da tela quando ela bloqueia.</p>
     <input id="aut-busca" placeholder="Buscar conta (ex.: Twitch)" spellcheck="false" value="${esc(autFiltro)}">
@@ -35,6 +46,11 @@ async function abrirAutenticador() {
   $('aut-add').onclick = autAdicionarTela;
   $('aut-google').onclick = autGoogleTela;
   $('aut-bk').onclick = autBackupTela;
+  $('aut-sel').onclick = () => { autSelecionando = true; autSel.clear(); autDesenhar(true); };
+  $('aut-sel-sair').onclick = () => { autSelecionando = false; autSel.clear(); autDesenhar(true); };
+  $('aut-sel-todas').onclick = () => { for (const c of autUltima) autSel.add(c.id); autDesenhar(true); };
+  $('aut-sel-nenhuma').onclick = () => { autSel.clear(); autDesenhar(true); };
+  $('aut-sel-remover').onclick = autRemoverSelecionadas;
   $('aut-busca').oninput = () => { autFiltro = $('aut-busca').value; autDesenhar(true); };
   await autDesenhar(true);
   autTimer = setInterval(() => autDesenhar(false), 1000);
@@ -49,6 +65,16 @@ async function autDesenhar(refazer) {
   const f = autFiltro.trim().toLowerCase();
   const vis = lista.filter((c) => !f || `${c.emissor} ${c.nome}`.toLowerCase().includes(f))
     .sort((a, b) => `${a.emissor} ${a.nome}`.localeCompare(`${b.emissor} ${b.nome}`, 'pt-BR'));
+  // barra do modo de seleção
+  const barraSel = $('aut-barra-sel');
+  if (barraSel) {
+    barraSel.classList.toggle('hidden', !autSelecionando);
+    $('aut-sel').classList.toggle('hidden', autSelecionando);
+    for (const id of [...autSel]) if (!lista.some((c) => c.id === id)) autSel.delete(id);
+    $('aut-sel-n').textContent = `${autSel.size} selecionada${autSel.size === 1 ? '' : 's'}`;
+    $('aut-sel-remover').disabled = !autSel.size;
+    $('aut-sel-remover').textContent = autSel.size ? `Remover selecionadas (${autSel.size})` : 'Remover selecionadas';
+  }
   const mudou = refazer || vis.length !== autUltima.length || vis.some((c, i) => !autUltima[i] || autUltima[i].id !== c.id || autUltima[i].nome !== c.nome || autUltima[i].emissor !== c.emissor);
   autUltima = vis;
   if (!lista.length) {
@@ -57,7 +83,8 @@ async function autDesenhar(refazer) {
   }
   if (mudou) {
     box.innerHTML = vis.map((c) => `
-      <div class="aut-card" data-id="${esc(c.id)}">
+      <div class="aut-card${autSelecionando ? ' selecionando' : ''}${autSel.has(c.id) ? ' marcada' : ''}" data-id="${esc(c.id)}">
+        ${autSelecionando ? `<input type="checkbox" class="aut-check" aria-label="Selecionar ${esc(c.emissor || c.nome)}" ${autSel.has(c.id) ? 'checked' : ''}>` : ''}
         <div class="aut-cab"><div class="aut-nomes"><span class="aut-emissor">${esc(c.emissor || 'Conta')}</span><span class="aut-nome">${esc(c.nome)}</span></div>
           <div class="aut-menu"><button class="mini" data-aut="ren">Renomear</button><button class="mini" data-aut="qr">QR</button><button class="mini perigo-borda" data-aut="del">Remover</button></div></div>
         <button class="aut-codigo" data-aut="copiar" title="Clique para copiar"><span data-cod></span></button>
@@ -65,6 +92,11 @@ async function autDesenhar(refazer) {
       </div>`).join('') || '<p class="cinza">Nenhuma conta com esse nome.</p>';
     for (const card of box.querySelectorAll('.aut-card')) {
       const id = card.dataset.id;
+      if (autSelecionando) {
+        // no modo de seleção, clicar no cartão marca/desmarca
+        card.onclick = () => { if (autSel.has(id)) autSel.delete(id); else autSel.add(id); autDesenhar(true); };
+        continue;
+      }
       for (const b of card.querySelectorAll('[data-aut]')) b.onclick = () => autAcao(b.dataset.aut, id, card);
     }
   }
@@ -129,6 +161,32 @@ async function autAcao(acao, id, card) {
       } catch (e) { $('a-erro').textContent = e.message; }
     };
   }
+}
+
+// ----- Remover várias de uma vez -----
+function autRemoverSelecionadas() {
+  const ids = [...autSel];
+  if (!ids.length) return;
+  const nomes = autUltima.filter((c) => autSel.has(c.id)).map((c) => (c.emissor ? c.emissor + ' – ' : '') + c.nome);
+  autParar();
+  abrirModal(`
+    <h2>Remover ${ids.length} conta${ids.length === 1 ? '' : 's'}</h2>
+    <p class="alerta">Você vai perder os códigos destas contas neste programa. Confira antes se elas estão no celular ou num backup, ou você pode ficar sem acesso aos sites.</p>
+    <div class="aut-remover-lista">${nomes.map((n) => `<div>• ${esc(n)}</div>`).join('')}</div>
+    <label>Sua senha</label><input id="a-senha" type="password">
+    <p id="a-erro" class="erro"></p>
+    <div class="linha"><button id="a-voltar">Voltar</button><button id="a-ok" class="perigo">Remover ${ids.length}</button></div>`);
+  $('a-senha').focus();
+  $('a-voltar').onclick = abrirAutenticador;
+  $('a-ok').onclick = async () => {
+    $('a-erro').textContent = '';
+    try {
+      const r = await rpc('autRemoverVarias', { ids, password: $('a-senha').value });
+      autSel.clear(); autSelecionando = false;
+      aviso(`${r.removidas} conta(s) removida(s) do autenticador`);
+      abrirAutenticador();
+    } catch (e) { $('a-erro').textContent = e.message; }
+  };
 }
 
 // ----- Adicionar uma conta -----
