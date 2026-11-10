@@ -361,6 +361,7 @@ let timerMonitor = null;
 let rodando = false;
 let pedirDeNovo = false;
 let rodizio = 0;
+let ultimoTanque = 0;
 const saldosMem = {}; // índice da carteira -> { assetId: { raw, decimals } }
 
 function valorUsd(assetId, raw, decimals) {
@@ -548,7 +549,10 @@ async function cicloMonitor() {
       }
       ultimoGeral = agora;
       const focada = data.wallets.find((w) => w.index === foco);
-      const lista = [...new Set((focada ? [focada] : []).concat(lote))];
+      const tq = settings().carteiraTaxas;
+      const tanque = tq != null && tq !== foco && agora - (ultimoTanque || 0) > 15000 ? data.wallets.find((w) => w.index === tq) : null;
+      if (tanque) ultimoTanque = agora;
+      const lista = [...new Set((focada ? [focada] : []).concat(tanque ? [tanque] : [], lote))];
       await precos.atualizar().catch((e) => log('[preços] ' + e.message));
       for (const w of lista) { await verificarCarteira(w, w.index === foco); enviarResumo(); }
       fs.writeFileSync(saldosFile(), JSON.stringify(ultimos));
@@ -573,6 +577,34 @@ handle('monitorFoco', ({ index }) => {
 });
 handle('monitorAgora', () => { cicloMonitor(); return true; });
 handle('resumo', () => resumo());
+
+// Cartão da carteira de taxas (topo da barra lateral)
+const MOEDAS_TAXA = ['trx', 'bnb', 'pol', 'sol', 'eth'];
+const MINIMO_TAXA_USD = { trx: 3, bnb: 0.5, pol: 0.2, sol: 0.3, eth: 2 };
+handle('resumoTaxas', () => {
+  const s = settings();
+  if (s.carteiraTaxas == null || !session) return null;
+  const w = (readJson(dataFile()) || { wallets: [] }).wallets.find((x) => x.index === s.carteiraTaxas);
+  if (!w) return null;
+  const m = saldosMem[w.index] || {};
+  let total = 0;
+  const moedasT = MOEDAS_TAXA.map((id) => {
+    const v = m[id];
+    const a = getAsset(id).asset;
+    if (!v) return { symbol: a.symbol, balance: '…', usd: null, baixo: false };
+    const usd = valorUsd(id, v.raw, v.decimals);
+    if (usd) total += usd;
+    return { symbol: a.symbol, balance: fmt(v.raw, v.decimals, 4), usd, baixo: usd != null && usd < MINIMO_TAXA_USD[id] };
+  });
+  return { index: w.index, name: w.name, total, moedas: moedasT };
+});
+handle('definirCarteiraTaxas', ({ index }) => {
+  const atual = readJson(cfgFile()) || {};
+  atual.carteiraTaxas = index === '' || index == null ? null : Number(index);
+  writeJson(cfgFile(), atual);
+  cicloMonitor();
+  return true;
+});
 
 // ---------- Verificar endereço de destino ----------
 function enderecoValidoPara(net, a) {
@@ -1182,6 +1214,10 @@ app.whenReady().then(() => {
           out.push('saldos ' + [...document.querySelectorAll('[data-saldo]')].map(x => x.dataset.saldo + '=' + x.textContent).join(' | '));
           out.push('hora ' + document.getElementById('hora-saldo').textContent);
           out.push('linha SOL ' + [...document.querySelector('tr[data-grupo="SOL"]').querySelectorAll('td')].map(td => td.textContent.replace(/\\s+/g, ' ').trim()).join(' | '));
+          await c('definirCarteiraTaxas', { index: 1 });
+          await carregarCarteiras(); await new Promise(r => setTimeout(r, 4000)); await mostrarTanque();
+          out.push('cartao taxas ' + document.getElementById('tanque').textContent.replace(/\\s+/g, ' ').trim());
+          out.push('lista sem taxas ' + [...document.querySelectorAll('#lista-carteiras li')].length);
           out.push('cabecalho ' + [...document.querySelectorAll('thead th')].map(t => t.textContent).join(' | '));
           out.push('resumo ' + JSON.stringify(await c('resumo')));
           out.push('busca usdt ' + JSON.stringify(await c('buscarMoeda', { texto: 'usdt' })));

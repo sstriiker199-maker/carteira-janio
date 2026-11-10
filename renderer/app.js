@@ -121,10 +121,46 @@ async function abrirPrincipal() {
   selecionar(atual);
 }
 
+let tanqueIndex = null;
+
+async function mostrarTanque() {
+  let t = null;
+  try { t = await rpc('resumoTaxas'); } catch { t = null; }
+  const box = $('tanque');
+  tanqueIndex = t ? t.index : null;
+  if (!t) {
+    box.innerHTML = '<button id="tq-escolher" class="largo">⛽ Escolher carteira de taxas</button>';
+    $('tq-escolher').onclick = escolherTanque;
+    return;
+  }
+  const baixos = t.moedas.filter((m) => m.baixo).map((m) => m.symbol);
+  box.innerHTML = `
+    <div class="tq-topo"><b>⛽ ${esc(t.name)}</b><span class="li-total">${esc(dolar(t.total))}</span></div>
+    <div class="tq-moedas">${t.moedas.map((m) => `<span class="${m.baixo ? 'baixo' : ''}">${esc(m.symbol)} ${esc(m.balance)}</span>`).join(' · ')}</div>
+    ${baixos.length ? `<div class="tq-aviso">⚠️ ${esc(baixos.join(', '))} acabando</div>` : ''}`;
+  box.classList.toggle('ativa', atual === t.index);
+  box.onclick = () => selecionar(t.index);
+}
+
+function escolherTanque() {
+  abrirModal(`
+    <h2>⛽ Carteira de taxas</h2>
+    <p class="sub">Escolha a carteira que vai pagar as taxas das outras (deixe nela TRX, BNB, POL, SOL e ETH).</p>
+    <select id="tq-sel"><option value="">— nenhuma —</option>${carteiras.map((c) => `<option value="${c.index}">${esc(c.name)}</option>`).join('')}</select>
+    <div class="linha"><button id="m-fechar">Cancelar</button><button id="m-ok" class="primario">Salvar</button></div>`);
+  $('m-fechar').onclick = fecharModal;
+  $('m-ok').onclick = async () => {
+    await rpc('definirCarteiraTaxas', { index: $('tq-sel').value });
+    fecharModal();
+    await carregarCarteiras();
+  };
+}
+
 async function carregarCarteiras() {
   carteiras = await rpc('wallets');
   try { for (const r of await rpc('resumo')) if (r.totalUsd != null) totais[r.index] = r.totalUsd; } catch { /* ok */ }
-  $('lista-carteiras').innerHTML = carteiras.map((c) => `
+  await mostrarTanque();
+  $('lista-carteiras').innerHTML = carteiras.filter((c) => c.index !== tanqueIndex).map((c) => `
     <li data-i="${c.index}" class="${c.index === atual ? 'ativa' : ''}">
       <div class="li-topo"><span>${esc(c.name)}</span><span class="li-total" data-total="${c.index}">${esc(dolar(totais[c.index]))}</span></div>
       <small>${c.importada ? '📥 ' : ''}${esc(c.evmAddress.slice(0, 8))}…${esc(c.evmAddress.slice(-6))}</small>
@@ -139,6 +175,7 @@ function carteiraAtual() {
 function selecionar(index) {
   atual = index;
   for (const li of $('lista-carteiras').querySelectorAll('li')) li.classList.toggle('ativa', Number(li.dataset.i) === index);
+  $('tanque').classList.toggle('ativa', index === tanqueIndex);
   const c = carteiraAtual();
   $('nome-carteira').textContent = c.name;
   $('end-evm').textContent = c.evmAddress;
@@ -300,9 +337,12 @@ function mostrarTotais() {
   $('total-carteira').textContent = totais[atual] != null ? dolar(totais[atual]) : '';
 }
 
+let tanqueTimer = null;
 window.api.onResumo((lista) => {
   for (const r of lista) if (r.totalUsd != null) totais[r.index] = r.totalUsd;
   mostrarTotais();
+  clearTimeout(tanqueTimer);
+  tanqueTimer = setTimeout(mostrarTanque, 500);
 });
 
 // ---------- Busca de moeda em todas as carteiras ----------
@@ -1155,6 +1195,7 @@ $('btn-config').onclick = async () => {
       });
       fecharModal();
       aviso('Configurações salvas');
+      await carregarCarteiras();
     } catch (e) { $('m-erro').textContent = e.message; }
   };
 };

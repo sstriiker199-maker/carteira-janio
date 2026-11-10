@@ -149,3 +149,12 @@ table.multi input, table.multi select { margin-bottom: 4px; padding: 6px 8px; }
 
 td.saldo.hoje { font-weight: 600; white-space: nowrap; }
 td.saldo .usd { white-space: nowrap; }
+
+.tanque { background: #1f2a1f; border: 1px solid #2f5a34; border-radius: 10px; padding: 10px; margin-bottom: 12px; cursor: pointer; }
+.tanque:hover { background: #243324; }
+.tanque.ativa { border-color: #4ade80; }
+.tanque button { margin: 0; }
+.tq-topo { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
+.tq-moedas { font-size: 11px; color: #9aa1b1; line-height: 1.5; }
+.tq-moedas .baixo { color: #fbbf24; }
+.tq-aviso { font-size: 12px; color: #fbbf24; margin-top: 4px; }
