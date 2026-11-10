@@ -836,6 +836,15 @@ handle('carteirasComSaldo', ({ assetId, minUsd }) => {
   return out.sort((a, b) => (b.usd || 0) - (a.usd || 0));
 });
 
+// Confere o saldo real agora (o da lista pode estar desatualizado no rodízio)
+handle('atualizarSaldo', async ({ index, assetId }) => {
+  const r = await fetchBalance(Number(index), assetId);
+  (saldosMem[Number(index)] = saldosMem[Number(index)] || {})[assetId] = { raw: r.raw, decimals: r.decimals };
+  if (ultimos) ultimos[`${index}|${assetId}`] = r.raw.toString();
+  ultimaConsulta[`${index}|${assetId}`] = Date.now();
+  return formatarSaldo(assetId, r.raw, r.decimals);
+});
+
 handle('planoJuntar', ({ destino, assetIds, origens, minUsd }) => {
   requireUnlocked();
   const data = readJson(dataFile());
@@ -1311,6 +1320,9 @@ app.whenReady().then(() => {
           await t('remover senha errada', () => c('removerCarteiras', { indices: [1], password: 'errada' }));
           await t('moedas favoritas', async () => { await c('salvarMoedasFavoritas', { ids: ['usdt-tron', 'sol', 'xrp'] }); return c('moedasFavoritas'); });
           await t('multiplos ordem', async () => { await carregarFavMoedas(); document.getElementById('btn-multiplos').click(); await new Promise(r => setTimeout(r, 300)); const o = [...document.getElementById('mm-moeda').options].slice(0, 4).map(x => x.textContent); fecharModal(); return o; });
+          await t('atualizar saldo', () => c('atualizarSaldo', { index: 0, assetId: 'sol' }));
+          await t('trx max sem saldo', () => c('estimate', { index: 1, assetId: 'trx', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', max: true }));
+          await t('bnb max sem saldo', () => c('estimate', { index: 1, assetId: 'bnb', to: '0x000000000000000000000000000000000000dEaD', max: true }));
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));

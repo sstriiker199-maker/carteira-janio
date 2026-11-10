@@ -984,7 +984,15 @@ $('btn-juntar').onclick = () => {
     let taxas = 0;
     for (const [i, it] of itens.entries()) {
       const st = document.querySelector(`[data-j="${i}"] .j-st`);
+      const tdSaldo = document.querySelector(`[data-j="${i}"] td.dir`);
       try {
+        // confere o saldo real antes (a lista pode estar desatualizada)
+        st.textContent = 'conferindo saldo…';
+        const real = await rpc('atualizarSaldo', { index: it.index, assetId: it.assetId });
+        tdSaldo.innerHTML = `${esc(real.balance)}<br><small class="cinza">${esc(dolar(real.usd))}</small>`;
+        it.usd = real.usd;
+        if (real.zero) { st.textContent = 'já está zerada'; it._ok = false; continue; }
+        if (Number($('j-min').value) > 0 && (real.usd == null || real.usd < Number($('j-min').value))) { st.textContent = 'pulado: abaixo do mínimo escolhido'; it._ok = false; continue; }
         const r = await rpc('estimate', { index: it.index, assetId: it.assetId, to: it.para, max: true });
         const taxaUsd = (r.feeUsd || 0) + (r.abastecer ? (r.abastecer.usd || 0) + (r.abastecer.taxaAbastecerUsd || 0) : 0);
         if (it.usd != null && taxaUsd > it.usd * 0.5) { st.textContent = `pulado: taxa (${dolar(taxaUsd)}) alta demais para o valor`; it._ok = false; continue; }
@@ -994,7 +1002,7 @@ $('btn-juntar').onclick = () => {
         ok++;
         soma += it.usd || 0;
         taxas += taxaUsd;
-      } catch (e) { st.textContent = e.message; st.classList.add('erro'); it._ok = false; }
+      } catch (e) { st.textContent = e.message; st.classList.add(/poeira|não tem/i.test(e.message) ? 'cinza' : 'erro'); it._ok = false; }
     }
     $('m-erro').innerHTML = ok ? `<span class="ok">${ok} envio(s) · total ≈ ${esc(dolar(soma))} · taxas ≈ ${esc(dolar(taxas))}</span>` : 'Nada pode ser juntado agora.';
     if (ok && !$('j-ir')) {

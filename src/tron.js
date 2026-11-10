@@ -56,10 +56,21 @@ async function prepare({ cfg, asset, from, to, amount, max, valorRaw }) {
   const trxBal = BigInt(await retry(() => t.trx.getBalance(from)));
 
   if (asset.native) {
-    const value = valorRaw != null ? BigInt(valorRaw) : max ? trxBal - TRX_RESERVE_SUN : parseAmount(amount, 6);
-    if (value <= 0n) throw new Error('Saldo de TRX insuficiente. É preciso deixar cerca de 1,5 TRX para a taxa.');
-    if (value + 1_100_000n > trxBal) throw new Error(`Deixe pelo menos 1,1 TRX na carteira para a taxa (saldo: ${fmt(trxBal, 6)} TRX).`);
-    return { value, decimals: 6, fee: 1_100_000n, feeMax: 1_100_000n, feeDecimals: 6, feeLabel: 'até', to };
+    // taxa real: 0 se a conta tem "banda" grátis; senão ~0,3 TRX. +1,1 TRX se o destino for uma conta nova.
+    let fee = 300_000n;
+    try {
+      const r = await retry(() => t.trx.getAccountResources(from));
+      const banda = Math.max(0, (r.freeNetLimit || 0) - (r.freeNetUsed || 0)) + Math.max(0, (r.NetLimit || 0) - (r.NetUsed || 0));
+      if (banda >= 300) fee = 0n;
+    } catch { /* usa estimativa */ }
+    try {
+      const destino = await retry(() => t.trx.getAccount(to));
+      if (!destino || !destino.address) fee += 1_100_000n;
+    } catch { /* considera ativa */ }
+    const value = valorRaw != null ? BigInt(valorRaw) : max ? trxBal - fee : parseAmount(amount, 6);
+    if (value <= 0n) throw new Error(trxBal === 0n ? 'Esta carteira não tem TRX.' : `Sobrou só poeira: ${fmt(trxBal, 6)} TRX não paga a taxa (${fmt(fee, 6)} TRX).`);
+    if (value + fee > trxBal) throw new Error(`Saldo insuficiente: valor + taxa (${fmt(fee, 6)} TRX) passa do saldo de ${fmt(trxBal, 6)} TRX.`);
+    return { value, decimals: 6, fee, feeMax: fee, feeDecimals: 6, feeLabel: fee === 0n ? '' : '≈', to };
   }
 
   const decimals = await tokenDecimals(t, asset, from);

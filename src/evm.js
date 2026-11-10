@@ -80,7 +80,9 @@ async function prepare({ net, url, asset, wallet, to, amount, max, velocidade, v
     try { gasLimit = await p.estimateGas({ from, to, value: 1n }); } catch { /* usa 21000 */ }
     const feeMax = gasLimit * f.worst;
     const value = valorRaw != null ? BigInt(valorRaw) : max ? nativeBal - feeMax : parseAmount(amount, asset.decimals);
-    if (value <= 0n) throw new Error(`Saldo de ${asset.symbol} insuficiente para cobrir a taxa (${fmt(feeMax, 18)} ${net.symbol}).`);
+    if (value <= 0n) {
+      throw new Error(nativeBal === 0n ? `Esta carteira não tem ${asset.symbol}.` : `Sobrou só poeira: ${fmt(nativeBal, 18)} ${asset.symbol} não paga a taxa (${fmt(feeMax, 18)} ${net.symbol}).`);
+    }
     if (value + feeMax > nativeBal) {
       throw new Error(`Saldo insuficiente: valor + taxa (${fmt(feeMax, 18)} ${net.symbol}) passa do saldo de ${fmt(nativeBal, 18)} ${asset.symbol}.`);
     }
