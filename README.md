@@ -1,33 +1,40 @@
-# Wallet - Trabalho
+# Wallet Pessoal
 
-Aplicativo de Windows para criar várias carteiras de criptomoedas (ex.: "Janio 1", "Janio 2"), receber e enviar.
+Carteira de criptomoedas para Windows (Electron + Node.js). Cria várias carteiras a partir de uma frase secreta só, recebe, envia, troca (swap) e mostra os saldos ao vivo.
 
-**Moedas:** BTC, ETH, ADA, BCH, LTC, DOGE, XRP, USDT (Tron, BNB, Ethereum, Polygon), BNB, TRX, USDC (Ethereum, BNB, Polygon, Tron), Lucky Block V2, SOL, AVAX, POL, SHIB, PEPE, BONK e TON.
+**Moedas e redes:** BTC, ETH (Ethereum, Arbitrum, Base, Optimism), BNB, POL, AVAX, TRX, SOL, BONK, XRP, TON, ADA, LTC, DOGE, BCH, SHIB, PEPE, Lucky Block V2, USDT (Tron, BNB, Ethereum, Polygon, Arbitrum, Optimism, Solana, TON) e USDC (Ethereum, BNB, Polygon, Tron, Arbitrum, Base, Optimism, Solana).
 
-**Funções:** várias carteiras numa frase só, importar carteira (MetaMask), saldos ao vivo com preço e variação 24h, total em dólar, busca de moeda, receber com QR Code, enviar com taxa Econômica/Normal/Rápida em dólar, verificação de endereço, carteira de taxas automática, envios múltiplos, juntar saldos, favoritos, troca (swap) via SideShift, aba Mercado, aba Atividade, notificações no Windows e por Gmail, atualização automática.
+**Funções:** várias carteiras numa frase, importar da MetaMask (frase ou chave), saldos e preços ao vivo, receber com QR Code, enviar com taxa Econômica/Normal/Rápida em dólar, verificação de endereço (bloqueia rede errada), carteira de taxas automática, Envio rápido, Envios múltiplos, Juntar saldos, Favoritos com Envio Express, comparador de trocas com 11 serviços (SideShift, THORChain, LI.FI, ChangeNOW, Jupiter, STON.fi, deBridge, Exolix, SimpleSwap, StealthEX, LetsExchange), Mercado, Atividade, avisos no Windows e por Gmail, bloqueio automático e atualização automática.
 
-## Como instalar
-1. Abra a página **Releases** do repositório (menu à direita).
-2. Baixe o arquivo **Wallet-Trabalho-Setup-x.x.x.exe** e abra.
-3. Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações → Executar assim mesmo** (aparece porque o app não tem certificado pago de assinatura).
+## Montar o programa a partir do código (Windows)
 
-## Atualizações
-No app, clique em **Atualizações** (barra lateral). Quando houver versão nova: **Baixar atualização → Instalar e reiniciar**. Suas carteiras não são apagadas.
+1. Instale o **Node.js 22 LTS**: https://nodejs.org (deixe as opções padrão).
+2. Extraia este .zip numa pasta, por exemplo `C:\wallet-pessoal`.
+3. Abra o **Prompt de Comando** nessa pasta (na barra de endereço da pasta, digite `cmd` e Enter).
+4. Rode, um de cada vez:
+   ```
+   npm install
+   npm start
+   ```
+   O `npm install` baixa as bibliotecas (leva alguns minutos). O `npm start` abre o programa para testar.
+5. Para gerar o instalador `.exe`:
+   ```
+   npm run dist
+   ```
+   O instalador fica na pasta `dist`.
+
+## Atualização automática
+
+O programa procura atualizações no GitHub configurado em `src/updater.js` (lista `FONTES`) e em `package.json` → `build.publish`. Quem for usar outra cópia deve trocar esses dados para o próprio repositório do GitHub, ou apagar a lista para não receber atualizações de ninguém.
 
 ## Segurança
-- A frase secreta de 12 palavras gera **todas** as carteiras. Anote em papel e guarde bem.
-- Ela fica salva só no seu PC, criptografada com a sua senha, em `%APPDATA%\Wallet - Trabalho\carteiras.json`.
-- A mesma frase pode ser importada na MetaMask (redes 0x…) ou Trust Wallet. As carteiras seguem o padrão: Janio 1 = conta 1, Janio 2 = conta 2…
-- **Teste com valores pequenos** antes de mover quantias grandes.
 
-## Taxas
-- Para enviar tokens (USDT, USDC, SHIB, PEPE…) é preciso ter a moeda principal da rede na mesma carteira: ETH na Ethereum, BNB na BNB Chain, POL na Polygon, TRX na Tron.
-- USDT na Tron costuma custar alguns TRX por envio.
-- A Circle parou de dar suporte ao USDC na rede Tron; prefira outra rede para USDC.
+- A frase secreta de 12 palavras gera **todas** as carteiras. Anote em papel e guarde bem; quem tiver a frase tem o dinheiro.
+- Ela fica só no computador, criptografada com a sua senha (scrypt + AES-256-GCM), em `%APPDATA%\Carteira Janio\carteiras.json`.
+- As chaves de API e a senha do Gmail ficam cifradas pelo próprio Windows.
+- Ative o bloqueio automático em Configurações → Segurança.
+- Teste com valores pequenos antes de mover quantias grandes.
 
-## Para desenvolvedores
-```
-npm install
-npm start
-```
-Publicar versão nova: aumentar `version` no package.json, criar a tag `vX.Y.Z` e enviar. O GitHub Actions monta o instalador e publica em Releases.
+## Publicar uma versão nova (para quem mantém o repositório)
+
+Aumente `version` no `package.json` e envie para o GitHub. O GitHub Actions monta o instalador e publica em Releases (`.github/workflows/release.yml`).
