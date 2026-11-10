@@ -1,1 +1,1 @@
-{ "name": "sonda-libs", "private": true, "dependencies": { "@mysten/sui": "^2.39.1" } }
+{ "name": "sonda-libs", "private": true, "dependencies": { "@aptos-labs/ts-sdk": "^1.39.0" } }
