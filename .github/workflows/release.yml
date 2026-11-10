@@ -85,3 +85,19 @@ jobs:
           V=${{ steps.prep.outputs.versao }}
           ID=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.draft and .tag_name == \"v$V\") | .id" | head -1)
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" -F draft=false -f make_latest=true --jq '.html_url'
+
+      # Cópia dos instaladores no repositório público de atualizações
+      # (permite deixar o código privado). Só roda se o segredo existir.
+      - name: Copiar para o repositório de atualizações
+        if: steps.prep.outputs.pular != '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_ATUALIZACOES }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::warning::Segredo TOKEN_ATUALIZACOES não configurado: instaladores ficam só neste repositório."; exit 0; fi
+          V=${{ steps.prep.outputs.versao }}
+          DEST=sstriiker199-maker/carteira-janio-atualizacoes
+          ls dist
+          gh release delete "v$V" -R "$DEST" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "v$V" -R "$DEST" --title "v$V" --notes "Versão $V do Wallet - Trabalho" --latest \
+            dist/*.exe dist/*.exe.blockmap dist/latest.yml

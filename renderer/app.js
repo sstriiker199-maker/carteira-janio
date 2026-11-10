@@ -1569,10 +1569,31 @@ $('btn-remover').onclick = () => {
 
 $('btn-bloquear').onclick = async () => {
   await rpc('lock');
+  telaBloqueada();
+};
+
+function telaBloqueada(msg) {
+  try { fecharModal(); } catch { /* sem janela aberta */ }
   carteiras = [];
   mostrar('tela-desbloquear');
+  $('entrar-erro').textContent = msg || '';
+  $('senha-entrar').value = '';
   $('senha-entrar').focus();
-};
+}
+
+// bloqueio automático: o programa avisa que bloqueou por falta de uso
+window.api.onBloqueado((d) => telaBloqueada(`🔒 Bloqueada automaticamente após ${d.minutos} min sem uso. Digite a senha para continuar.`));
+
+// mexer no mouse/teclado conta como "usando" (avisa no máximo a cada 20 s)
+let ultimoAvisoUso = 0;
+for (const ev of ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart']) {
+  window.addEventListener(ev, () => {
+    const agora = Date.now();
+    if (agora - ultimoAvisoUso < 20000) return;
+    ultimoAvisoUso = agora;
+    window.api.call('usando').catch(() => {});
+  }, { passive: true });
+}
 
 // ---------- Configurações ----------
 $('btn-config').onclick = async () => {
@@ -1580,6 +1601,12 @@ $('btn-config').onclick = async () => {
   const chk = (id, v, txt) => `<label class="check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> ${txt}</label>`;
   abrirModal(`
     <h2>Configurações</h2>
+
+    <h3>Segurança</h3>
+    <label>Bloquear a carteira sozinha depois de</label>
+    <select id="c-bloqueio">${[[1, '1 minuto sem uso'], [5, '5 minutos sem uso'], [10, '10 minutos sem uso'], [15, '15 minutos sem uso (recomendado)'], [30, '30 minutos sem uso'], [60, '1 hora sem uso'], [120, '2 horas sem uso'], [0, 'Nunca bloquear sozinha']]
+      .map(([v, t]) => `<option value="${v}" ${Number(s.bloqueioMin) === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <p class="ajuda">"Sem uso" = sem mexer no mouse ou teclado dentro do programa. Bloqueada, ela para de atualizar saldos e de avisar entradas até você digitar a senha.</p>
 
     <h3>Atualização dos saldos</h3>
     <label>Atualizar a carteira aberta a cada</label>
@@ -1700,6 +1727,7 @@ $('btn-config').onclick = async () => {
         tronApiKey: $('c-tronkey').value,
         chaves: lerChaves(),
         intervalo: Number($('c-intervalo').value),
+        bloqueioMin: Number($('c-bloqueio').value),
         todasIntervalo: $('c-todas').value,
         carteiraTaxas: $('c-taxas').value,
         notificar: { entradas: $('c-not-entradas').checked, envios: $('c-not-envios').checked },

@@ -19,6 +19,24 @@ function notasTexto(n) {
   return String(n).replace(/<[^>]+>/g, '').trim();
 }
 
+// De onde vêm as atualizações: primeiro o repositório público só de instaladores;
+// se ele ainda não existir / estiver vazio, o repositório antigo.
+const FONTES = [
+  { provider: 'github', owner: 'sstriiker199-maker', repo: 'carteira-janio-atualizacoes' },
+  { provider: 'github', owner: 'sstriiker199-maker', repo: 'carteira-janio' }
+];
+async function verificar() {
+  let ultimoErro;
+  for (const f of FONTES) {
+    try {
+      autoUpdater.setFeedURL(f);
+      const r = await autoUpdater.checkForUpdates();
+      if (r && r.updateInfo) return r;
+    } catch (e) { ultimoErro = e; }
+  }
+  throw ultimoErro || new Error('Não consegui verificar atualizações.');
+}
+
 function init(mainWindow) {
   win = mainWindow;
   if (app.isPackaged) {
@@ -32,7 +50,7 @@ function init(mainWindow) {
       autoUpdater.on('download-progress', (p) => set({ status: 'baixando', progresso: Math.round(p.percent || 0) }));
       autoUpdater.on('update-downloaded', (i) => set({ status: 'pronto', versaoNova: i.version, progresso: 100 }));
       autoUpdater.on('error', (e) => set({ status: 'erro', erro: (e && e.message) || String(e) }));
-      setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 5000);
+      setTimeout(() => verificar().catch(() => {}), 5000);
     } catch (e) {
       autoUpdater = null;
       estado.erro = 'Módulo de atualização indisponível: ' + e.message;
@@ -47,7 +65,7 @@ function init(mainWindow) {
   };
 
   ipcMain.handle('updState', ok(() => ({ ...estado, versaoAtual: app.getVersion(), instalado: !!autoUpdater })));
-  ipcMain.handle('updCheck', ok(async () => { precisa(); await autoUpdater.checkForUpdates(); return true; }));
+  ipcMain.handle('updCheck', ok(async () => { precisa(); await verificar(); return true; }));
   ipcMain.handle('updDownload', ok(async () => { precisa(); set({ status: 'baixando', progresso: 0 }); await autoUpdater.downloadUpdate(); return true; }));
   ipcMain.handle('updInstall', ok(() => { precisa(); setImmediate(() => autoUpdater.quitAndInstall(false, true)); return true; }));
 }

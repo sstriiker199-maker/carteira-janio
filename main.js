@@ -79,6 +79,7 @@ function settings() {
     chaves: Object.fromEntries(NOMES_CHAVES.map((k) => [k, s.chaves && s.chaves[k] ? alertas.decifrar(s.chaves[k]) : ''])),
     intervalo: Math.max(3, Number(s.intervalo) || 3),
     todasIntervalo: s.todasIntervalo != null ? s.todasIntervalo : 'auto',
+    bloqueioMin: s.bloqueioMin != null ? Number(s.bloqueioMin) : 15,
     carteiraTaxas: s.carteiraTaxas != null ? Number(s.carteiraTaxas) : null,
     notificar: { entradas: n.entradas !== false, envios: n.envios !== false },
     email: {
@@ -249,17 +250,30 @@ handle('unlock', ({ password }) => {
   const phrase = vault.decrypt(data.vault, password);
   const extras = data.extras ? JSON.parse(vault.decrypt(data.extras, password)) : { chaves: {}, frases: {} };
   session = { phrase, senha: password, extras };
+  ultimaAtividade = Date.now();
   try { carregarCache(); } catch { /* ok */ }
   return true;
 });
 
-handle('lock', () => {
+function bloquear() {
   session = null;
   foco = null;
   for (const k of Object.keys(saldosMem)) delete saldosMem[k];
   for (const k of Object.keys(keyCache)) delete keyCache[k];
-  return true;
-});
+}
+handle('lock', () => { bloquear(); return true; });
+
+// ---------- Bloqueio automático por falta de uso ----------
+let ultimaAtividade = Date.now();
+handle('usando', () => { ultimaAtividade = Date.now(); return true; });
+setInterval(() => {
+  const min = settings().bloqueioMin;
+  if (!session || !min) return;
+  if (Date.now() - ultimaAtividade < min * 60 * 1000) return;
+  bloquear();
+  log(`[bloqueio] carteira bloqueada após ${min} min sem uso`);
+  if (win && !win.isDestroyed()) win.webContents.send('bloqueado', { minutos: min });
+}, 15000);
 
 handle('wallets', () => {
   requireUnlocked();
@@ -1481,7 +1495,7 @@ function montarEmail(email, anterior) {
   };
 }
 
-handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteiraTaxas, chaves, todasIntervalo }) => {
+handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteiraTaxas, chaves, todasIntervalo, bloqueioMin }) => {
   const clean = {};
   for (const id of Object.keys(NETWORKS)) {
     const u = String((rpc && rpc[id]) || '').trim();
@@ -1498,6 +1512,7 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteira
     swap: (readJson(cfgFile()) || {}).swap,
     intervalo: Math.max(3, Number(intervalo) || 3),
     todasIntervalo: ['auto', 'rodizio'].includes(todasIntervalo) ? todasIntervalo : Math.max(10, Number(todasIntervalo) || 30),
+    bloqueioMin: [0, 1, 5, 10, 15, 30, 60, 120].includes(Number(bloqueioMin)) ? Number(bloqueioMin) : 15,
     carteiraTaxas: carteiraTaxas === '' || carteiraTaxas == null ? null : Number(carteiraTaxas),
     notificar: { entradas: !(notificar && notificar.entradas === false), envios: !(notificar && notificar.envios === false) },
     email: em
@@ -1623,6 +1638,7 @@ app.whenReady().then(() => {
           await t('estimar usdt-tron', () => c('estimate', { index: 0, assetId: 'usdt-tron', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount: '1' }));
           await t('endereco errado', () => c('estimate', { index: 0, assetId: 'usdt-bsc', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount: '1' }));
           await t('config', async () => (await c('getSettings')).intervalo);
+          await t('bloqueio padrao', async () => (await c('getSettings')).bloqueioMin + ' min; usando=' + await c('usando'));
           await abrirPrincipal();
           const cheios = (ms) => new Promise(r => setTimeout(() => r([...document.querySelectorAll('[data-saldo]')].filter(x => !/carregando/.test(x.textContent)).length), ms));
           out.push('preenchidos em 1s: ' + await cheios(1000) + ' / 19');
