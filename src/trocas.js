@@ -1,5 +1,15 @@
 // Comparador de trocas: THORChain, LI.FI e ChangeNOW (a SideShift fica em swap.js)
-const THORNODE = 'https://thornode.ninerealms.com';
+const THORNODES = ['https://gateway.liquify.com/chain/thorchain_api', 'https://thornode.ninerealms.com'];
+async function thorGet(caminho) {
+  let erro;
+  for (const base of THORNODES) {
+    try { return await getJson(base + caminho); } catch (e) {
+      erro = e;
+      if (!/fetch failed|timeout|HTTP 5|HTTP 403|HTTP 429|aborted/i.test(e.message)) throw e; // erro da cotação em si: não adianta outro servidor
+    }
+  }
+  throw erro;
+}
 const LIFI = 'https://li.quest/v1';
 const CHANGENOW = 'https://api.changenow.io/v2';
 
@@ -39,7 +49,7 @@ async function thorCotar({ de, para, valorRaw, decimaisDe, destino }) {
     from_asset: THOR_ATIVO[de.id], to_asset: THOR_ATIVO[para.id], amount: amount8.toString(),
     destination: thorDestino(para.id, destino), streaming_interval: '1', streaming_quantity: '0'
   });
-  const j = await getJson(`${THORNODE}/thorchain/quote/swap?${q}`);
+  const j = await thorGet(`/thorchain/quote/swap?${q}`);
   if (!j.memo || !j.inbound_address) throw new Error(j.message || 'cotação incompleta');
   return {
     recebe: Number(j.expected_amount_out) / 1e8,
@@ -52,7 +62,7 @@ async function thorCotar({ de, para, valorRaw, decimaisDe, destino }) {
 
 async function thorStatus(hash) {
   const h = String(hash).replace(/^0x/, '').toUpperCase();
-  const j = await getJson(`${THORNODE}/thorchain/tx/status/${h}`);
+  const j = await thorGet(`/thorchain/tx/status/${h}`);
   const st = j.stages || {};
   if (st.outbound_signed && st.outbound_signed.completed) return 'concluída';
   if (j.out_txs && j.out_txs.length && st.swap_finalised && st.swap_finalised.completed) return 'concluída';
