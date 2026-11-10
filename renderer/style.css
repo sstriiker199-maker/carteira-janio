@@ -164,3 +164,12 @@ td.saldo .usd { white-space: nowrap; }
 
 button.perigo-borda { border-color: #7f2a1a; color: #fca5a5; }
 button.perigo-borda:hover { background: #3a1a14; }
+
+table.moedas { width: auto; min-width: 100%; }
+table.moedas .c-moeda { width: 230px; }
+table.moedas .c-saldo { width: 200px; }
+table.moedas .c-preco { width: 150px; }
+table.moedas .c-hoje { width: 110px; }
+table.moedas .c-rede { width: 250px; padding-left: 24px; }
+table.moedas td:nth-child(5) { padding-left: 24px; }
+table.moedas td.botoes { text-align: left; }

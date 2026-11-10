@@ -241,12 +241,12 @@ function desenharTabela() {
         <img class="icone" data-icone="${esc(g.symbol)}" src="icons/${esc((ICONES[g.symbol] || g.symbol).toLowerCase())}.svg" alt="">
         <b>${esc(g.symbol)}</b><span>${esc(g.name)}</span>
       </td>
-      <td>${g.itens.length > 1
-        ? `<select class="sel-rede" data-rede="${esc(g.symbol)}">${g.itens.map((m) => `<option value="${m.id}">${esc(m.rotulo)}</option>`).join('')}</select>`
-        : `<span class="tag">${esc(g.itens[0].rotulo || g.itens[0].networkName)}</span>`}</td>
       <td class="saldo"><div data-saldo="${esc(g.symbol)}"></div><div class="usd" data-usd="${esc(g.symbol)}"></div></td>
       <td class="saldo"><div data-preco="${esc(g.symbol)}"></div><div class="usd" data-var="${esc(g.symbol)}"></div></td>
       <td class="saldo hoje" data-hoje="${esc(g.symbol)}"></td>
+      <td>${g.itens.length > 1
+        ? `<select class="sel-rede" data-rede="${esc(g.symbol)}">${g.itens.map((m) => `<option value="${m.id}">${esc(m.rotulo)}</option>`).join('')}</select>`
+        : `<span class="tag">${esc(g.itens[0].rotulo || g.itens[0].networkName)}</span>`}</td>
       <td class="botoes">
         <button data-receber-g="${esc(g.symbol)}">Receber</button>
         <button data-enviar-g="${esc(g.symbol)}" class="primario">Enviar</button>
