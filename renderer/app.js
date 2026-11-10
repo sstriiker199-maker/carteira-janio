@@ -553,7 +553,7 @@ function enviar(assetId) {
     if (!el) return;
     enderecoBloqueado = r.estado === 'bloqueado';
     el.className = 'verif ' + r.estado;
-    el.textContent = r.estado === 'vazio' ? '' : (r.estado === 'ok' ? '✅ ' : r.estado === 'atencao' ? '⚠️ ' : '❌ ') + r.mensagem;
+    el.innerHTML = r.estado === 'vazio' ? '' : esc((r.estado === 'ok' ? '✓ ' : r.estado === 'atencao' ? '⚠️ ' : '✕ ') + r.mensagem) + (r.dica ? `<span class="verif-dica">${esc(r.dica)}</span>` : '');
     $('e-calcular').disabled = enderecoBloqueado;
   }
   $('e-para').oninput = () => { limparResumo(); clearTimeout(verifTimer); verifTimer = setTimeout(verificar, 300); };
@@ -900,7 +900,7 @@ $('btn-contatos').onclick = async () => {
   const verificarNovo = async () => {
     const v = await rpc('verificarEndereco', { assetId: redeSel().assetId, endereco: $('nf-end').value }).catch(() => ({ estado: 'vazio' }));
     $('nf-verif').className = 'verif ' + v.estado;
-    $('nf-verif').textContent = v.estado === 'vazio' ? '' : (v.estado === 'ok' ? '✅ ' : v.estado === 'atencao' ? '⚠️ ' : '❌ ') + v.mensagem.replace(/mas você está enviando .*? pela rede/, 'mas você escolheu a rede').replace('Envio bloqueado: o dinheiro seria perdido.', '');
+    $('nf-verif').innerHTML = v.estado === 'vazio' ? '' : esc((v.estado === 'ok' ? '✓ ' : v.estado === 'atencao' ? '⚠️ ' : '✕ ') + v.mensagem.replace(/mas você está enviando .*? pela rede/, 'mas você escolheu a rede').replace('Envio bloqueado: o dinheiro seria perdido.', '')) + (v.dica ? `<span class="verif-dica">${esc(v.dica)}</span>` : '');
     $('nf-salvar').disabled = v.estado === 'bloqueado';
   };
   $('nf-rede').onchange = () => { ajustarMemo(); verificarNovo(); };
@@ -1227,7 +1227,7 @@ async function carregarMultiplos() {
       const r = await rpc('verificarEndereco', { assetId, endereco: tr.querySelector('.mm-dest').value }).catch(() => ({ estado: 'vazio' }));
       const st = tr.querySelector('.mm-status');
       st.className = 'mm-status verif ' + r.estado;
-      st.textContent = r.estado === 'vazio' ? '—' : (r.estado === 'ok' ? '✅ endereço ok' : r.estado === 'atencao' ? '⚠️ ' + r.mensagem : '❌ ' + r.mensagem);
+      st.textContent = r.estado === 'vazio' ? '—' : (r.estado === 'ok' ? '✓ endereço ok' : r.estado === 'atencao' ? '⚠️ ' + r.mensagem : '✕ ' + r.mensagem);
     };
     tr.querySelector('.mm-dest').onchange = verifLinha;
     tr.querySelector('.mm-dest').onblur = verifLinha;

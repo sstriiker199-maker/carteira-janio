@@ -749,15 +749,16 @@ handle('verificarEndereco', ({ assetId, endereco }) => {
   }
   const nomeMoeda = `${asset.symbol} pela rede ${net.rotulo}`;
   if (enderecoValidoPara(net, a)) {
-    let msg = `Endereço válido da rede ${net.kind === 'evm' ? net.rotulo : net.rotulo}.`;
-    if (net.kind === 'evm') msg += ` Endereços 0x servem para várias redes: confira se o destino aceita ${net.rotulo}.`;
+    const msg = `Endereço válido da rede ${net.rotulo}.`;
+    // lembrete neutro (não é problema): o mesmo 0x existe em várias redes
+    const dica = net.kind === 'evm' ? `Endereços 0x servem para várias redes: confira se o destino aceita ${net.rotulo}.` : '';
     let meu = null;
     try {
       const data = readJson(dataFile());
       const w = data.wallets.find((x) => { try { return addressFor(x.index, net.id).toLowerCase() === a.toLowerCase(); } catch { return false; } });
       if (w) meu = w.name;
     } catch { /* ok */ }
-    return { estado: net.kind === 'evm' ? 'atencao' : 'ok', mensagem: msg + (meu ? ` É a sua carteira "${meu}".` : '') };
+    return { estado: 'ok', mensagem: msg + (meu ? ` É a sua carteira "${meu}".` : ''), dica };
   }
   if (redes.length) {
     return { estado: 'bloqueado', mensagem: `Este endereço é da rede ${redes.join(' / ')}, mas você está enviando ${nomeMoeda}. Envio bloqueado: o dinheiro seria perdido.` };

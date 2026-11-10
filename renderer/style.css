@@ -314,3 +314,5 @@ details.ajuda summary { cursor: pointer; }
 .aut-card { position: relative; }
 .aut-menu { position: absolute; top: 10px; right: 10px; background: var(--painel2); padding-left: 6px; }
 .aut-nome { white-space: normal; word-break: break-all; }
+.verif-dica { display: block; color: var(--mut); font-size: 12px; margin-top: 3px; }
+.verif.ok { font-weight: 500; }
