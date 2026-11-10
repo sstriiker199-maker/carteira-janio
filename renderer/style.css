@@ -172,7 +172,7 @@ table.moedas .c-preco { width: 150px; }
 table.moedas .c-hoje { width: 110px; }
 table.moedas .c-rede { width: 250px; padding-left: 24px; }
 table.moedas td:nth-child(5) { padding-left: 24px; }
-table.moedas td.botoes { text-align: left; }
+table.moedas td.botoes { text-align: right; padding-right: 16px; }
 
 .xp-lista { display: flex; flex-direction: column; gap: 8px; max-height: 45vh; overflow-y: auto; }
 .xp-card { background: #1a2130; border: 1px solid #2b3550; border-radius: 10px; padding: 10px 12px; }

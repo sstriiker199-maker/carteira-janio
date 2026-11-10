@@ -33,11 +33,11 @@ const THOR_ATIVO = {
   'usdt-tron': 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T',
   'usdc-eth': 'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48',
   'usdc-bsc': 'BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D',
-  atom: 'GAIA.ATOM', 'eth-base': 'BASE.ETH',
+  'eth-base': 'BASE.ETH',
   'usdc-base': 'BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913'
 };
 // de quais moedas o programa já sabe fazer o depósito na THORChain (com o "memo")
-const THOR_ORIGEM = new Set(['btc', 'ltc', 'doge', 'bch', 'eth', 'bnb', 'avax', 'usdt-eth', 'usdt-bsc', 'usdc-eth', 'usdc-bsc', 'atom', 'eth-base', 'usdc-base']);
+const THOR_ORIGEM = new Set(['btc', 'ltc', 'doge', 'bch', 'eth', 'bnb', 'avax', 'usdt-eth', 'usdt-bsc', 'usdc-eth', 'usdc-bsc', 'eth-base', 'usdc-base']);
 
 function thorDestino(assetId, addr) {
   return assetId === 'bch' ? String(addr).replace(/^bitcoincash:/, '') : addr;
@@ -79,14 +79,14 @@ async function thorStatus(hash) {
 }
 
 // ---------------- LI.FI ----------------
-const LIFI_CHAIN = { ethereum: 1, bsc: 56, polygon: 137, avalanche: 43114, solana: 1151111081099710, arbitrum: 42161, base: 8453, optimism: 10, sui: 9270000000000000 };
-// redes de onde o programa sabe enviar pela LI.FI (Sui só como destino)
+const LIFI_CHAIN = { ethereum: 1, bsc: 56, polygon: 137, avalanche: 43114, solana: 1151111081099710, arbitrum: 42161, base: 8453, optimism: 10 };
+// redes de onde o programa sabe enviar pela LI.FI
 const LIFI_ORIGEM = new Set(['ethereum', 'bsc', 'polygon', 'avalanche', 'solana', 'arbitrum', 'base', 'optimism']);
 const NATIVO_EVM = '0x0000000000000000000000000000000000000000';
 const NATIVO_SOL = '11111111111111111111111111111111';
 
 function lifiToken(asset) {
-  if (asset.native) return asset.network === 'solana' ? NATIVO_SOL : asset.network === 'sui' ? '0x2::sui::SUI' : NATIVO_EVM;
+  if (asset.native) return asset.network === 'solana' ? NATIVO_SOL : NATIVO_EVM;
   return asset.contract;
 }
 
@@ -122,8 +122,7 @@ const CN_REDE = {
   ethereum: ['eth'], bsc: ['bsc'], polygon: ['matic', 'polygon', 'pol'], avalanche: ['avaxc', 'cchain', 'avax'],
   tron: ['trx', 'tron'], bitcoin: ['btc'], litecoin: ['ltc'], dogecoin: ['doge'], bitcoincash: ['bch'],
   solana: ['sol'], xrp: ['xrp'], ton: ['ton'], cardano: ['ada', 'cardano'],
-  arbitrum: ['arbitrum', 'arb'], base: ['base'], optimism: ['op', 'optimism'],
-  sui: ['sui'], aptos: ['apt', 'aptos'], cosmos: ['atom', 'cosmos'], polkadot: ['assethub', 'dot']
+  arbitrum: ['arbitrum', 'arb'], base: ['base'], optimism: ['op', 'optimism']
 };
 let cnMoedas = null;
 

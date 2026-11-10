@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SIMBOLOS = ['eth', 'bnb', 'matic', 'avax', 'trx', 'usdt', 'usdc', 'shib', 'pepe', 'btc', 'ltc', 'doge', 'bch', 'sol', 'xrp', 'ada', 'ton', 'bonk', 'atom', 'dot'];
+const SIMBOLOS = ['eth', 'bnb', 'matic', 'avax', 'trx', 'usdt', 'usdc', 'shib', 'pepe', 'btc', 'ltc', 'doge', 'bch', 'sol', 'xrp', 'ada', 'ton', 'bonk'];
 const destino = path.join(__dirname, '..', 'renderer', 'icons');
 
 let origem;
@@ -31,9 +31,7 @@ const TOKENS = {
   lblock: 'ethereum/assets/0x2b867efD2dE4Ad2B583Ca0CB3dF9C4040Ef4D329',
   bonk: 'solana/assets/DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
   pol: 'polygon/info',
-  ton: 'ton/info',
-  sui: 'sui/info',
-  apt: 'aptos/info'
+  ton: 'ton/info'
 };
 (async () => {
   for (const [nome, caminho] of Object.entries(TOKENS)) {

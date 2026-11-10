@@ -5,8 +5,7 @@ const BASE = 'https://sideshift.ai/api/v2';
 const REDE = {
   ethereum: 'ethereum', bsc: 'bsc', polygon: 'polygon', avalanche: 'avax', tron: 'tron', bitcoin: 'bitcoin',
   litecoin: 'litecoin', dogecoin: 'doge', bitcoincash: 'bitcoincash', solana: 'solana', xrp: 'ripple',
-  ton: 'ton', cardano: 'cardano', arbitrum: 'arbitrum', base: 'base', optimism: 'optimism',
-  sui: 'sui', aptos: 'aptos', cosmos: 'cosmos', polkadot: 'polkadot'
+  ton: 'ton', cardano: 'cardano', arbitrum: 'arbitrum', base: 'base', optimism: 'optimism'
 };
 
 async function req(caminho, { method = 'GET', body, secret } = {}) {

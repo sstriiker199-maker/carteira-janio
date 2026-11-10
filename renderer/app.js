@@ -681,7 +681,7 @@ async function resolverDestino(valor, assetId) {
 
 // ---------- Trocar (swap) ----------
 // reserva para a taxa quando o usuário clica em Máx numa moeda principal
-const RESERVA = { ETH: 0.0005, BNB: 0.0005, POL: 0.05, AVAX: 0.005, TRX: 2, BTC: 0.00005, LTC: 0.0005, DOGE: 2, BCH: 0.0002, SOL: 0.0001, XRP: 1.1, TON: 0.05, ADA: 0.5, SUI: 0.01, APT: 0.005, ATOM: 0.01, DOT: 0.03 };
+const RESERVA = { ETH: 0.0005, BNB: 0.0005, POL: 0.05, AVAX: 0.005, TRX: 2, BTC: 0.00005, LTC: 0.0005, DOGE: 2, BCH: 0.0002, SOL: 0.0001, XRP: 1.1, TON: 0.05, ADA: 0.5 };
 
 // 🔍 Pares aceitos: para qual moeda dá para trocar, e por qual serviço
 async function abrirPares(assetIdInicial, preDe, prePara) {
@@ -744,7 +744,7 @@ $('btn-trocar').onclick = (ev, preDe, prePara) => {
     <select id="s-para">${opPara}</select>
     <label>Receber na carteira</label>
     <select id="s-destino">${carteiras.map((c) => `<option value="${c.index}" ${c.index === atual ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-    <p class="ajuda">O programa compara SideShift, THORChain, LI.FI e ChangeNOW e mostra o mais barato. Valores muito pequenos podem não ser aceitos (mínimo de cada serviço).</p>
+    <p class="ajuda">O programa compara 11 serviços (SideShift, THORChain, LI.FI, ChangeNOW, Jupiter, STON.fi, deBridge, Exolix, SimpleSwap, StealthEX e LetsExchange) e mostra o mais barato. Valores muito pequenos podem não ser aceitos (mínimo de cada serviço).</p>
     <p id="m-erro" class="erro"></p>
     <div id="s-resumo"></div>
     <div class="linha" id="s-botoes"><button id="m-fechar">Cancelar</button><button id="s-cotar" class="primario">Comparar cotações</button></div>`);
@@ -765,7 +765,7 @@ $('btn-trocar').onclick = (ev, preDe, prePara) => {
   $('s-cotar').onclick = async () => {
     limpar();
     $('s-cotar').disabled = true;
-    $('s-cotar').textContent = 'Comparando 4 serviços…';
+    $('s-cotar').textContent = 'Comparando os serviços…';
     const pedido = { index: atual, de: $('s-de').value, para: $('s-para').value, amount: $('s-valor').value, destinoIndex: Number($('s-destino').value) };
     try {
       const r = await rpc('swapComparar', pedido);
@@ -1140,6 +1140,12 @@ async function ligarExpress(lista) {
 async function favoritoVinculado(assetId, index) {
   const m = moedas.find((x) => x.id === assetId);
   try { return (await rpc('contatos', { rede: m.network })).find((f) => f.carteira === index) || null; } catch { return null; }
+}
+
+// lê todos os campos de chave de API da tela de Configurações
+function lerChaves() {
+  const ids = ['alchemy', 'helius', 'toncenter', 'changenow', 'lifi', 'jupiter', 'simpleswap', 'stealthex', 'letsexchange', 'letsexchangeAfiliado'];
+  return Object.fromEntries(ids.map((k) => [k, $('k-' + k) ? $('k-' + k).value : '']));
 }
 
 // ---------- Envios múltiplos ----------
@@ -1630,6 +1636,20 @@ $('btn-config').onclick = async () => {
       <label>ChangeNOW — trocas (swap), inclusive TON, ADA e BCH</label>
       <input id="k-changenow" type="password" value="${esc(s.chaves.changenow || '')}" placeholder="cole a API Key" spellcheck="false">
       <p class="ajuda">Em <b>changenow.io/affiliate</b> → entre como parceiro → Partner dashboard → "API key".</p>
+      <label>SimpleSwap — trocas (swap)</label>
+      <input id="k-simpleswap" type="password" value="${esc(s.chaves.simpleswap || '')}" placeholder="cole a API Key" spellcheck="false">
+      <p class="ajuda">Em <b>partners.simpleswap.io</b> → crie a conta → "API keys".</p>
+      <label>StealthEX — trocas (swap)</label>
+      <input id="k-stealthex" type="password" value="${esc(s.chaves.stealthex || '')}" placeholder="cole a API Key" spellcheck="false">
+      <p class="ajuda">Em <b>stealthex.io/pp</b> → crie a conta → "API keys".</p>
+      <label>LetsExchange — trocas (swap): chave e código de afiliado</label>
+      <input id="k-letsexchange" type="password" value="${esc(s.chaves.letsexchange || '')}" placeholder="cole a API Key (token)" spellcheck="false">
+      <input id="k-letsexchangeAfiliado" value="${esc(s.chaves.letsexchangeAfiliado || '')}" placeholder="cole o Affiliate ID" spellcheck="false">
+      <p class="ajuda">Em <b>letsexchange.io</b> → programa de afiliados → painel → "API" (copie o token e o affiliate ID).</p>
+      <label>Jupiter — trocas dentro da Solana (opcional)</label>
+      <input id="k-jupiter" type="password" value="${esc(s.chaves.jupiter || '')}" placeholder="opcional — funciona sem chave" spellcheck="false">
+      <p class="ajuda">Opcional. Chave grátis em <b>portal.jup.ag</b> (dá mais cotações por minuto).</p>
+      <p class="ajuda">Exolix, deBridge e STON.fi funcionam sem chave.</p>
       <label>LI.FI — trocas entre Ethereum, BNB, Polygon, Avalanche e Solana (opcional)</label>
       <input id="k-lifi" type="password" value="${esc(s.chaves.lifi || '')}" placeholder="opcional — funciona sem chave" spellcheck="false">
       <p class="ajuda">Opcional: sem chave funciona, só com limite menor de cotações. Chave grátis em <b>portal.li.fi</b>.</p>
@@ -1661,7 +1681,7 @@ $('btn-config').onclick = async () => {
   $('k-testar').onclick = async () => {
     $('k-res').textContent = 'Testando…';
     try {
-      const r = await rpc('testarChaves', { chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value, changenow: $('k-changenow').value, lifi: $('k-lifi').value }, tronApiKey: $('c-tronkey').value });
+      const r = await rpc('testarChaves', { chaves: lerChaves(), tronApiKey: $('c-tronkey').value });
       $('k-res').innerHTML = Object.entries(r).map(([k, v]) => `${v === 'ok' ? '✅' : '❌'} <b>${esc(k)}</b> ${v === 'ok' ? 'funcionando' : esc(v)}`).join('<br>');
     } catch (e) { $('k-res').textContent = e.message; }
   };
@@ -1678,7 +1698,7 @@ $('btn-config').onclick = async () => {
       await rpc('saveSettings', {
         rpc: servidores,
         tronApiKey: $('c-tronkey').value,
-        chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value, changenow: $('k-changenow').value, lifi: $('k-lifi').value },
+        chaves: lerChaves(),
         intervalo: Number($('c-intervalo').value),
         todasIntervalo: $('c-todas').value,
         carteiraTaxas: $('c-taxas').value,

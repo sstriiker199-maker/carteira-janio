@@ -6,15 +6,13 @@ const BINANCE = 'https://data-api.binance.vision/api/v3/ticker/24hr';
 const PARES = {
   ETH: 'ETHUSDT', BNB: 'BNBUSDT', POL: 'POLUSDT', AVAX: 'AVAXUSDT', TRX: 'TRXUSDT', USDC: 'USDCUSDT',
   SHIB: 'SHIBUSDT', PEPE: 'PEPEUSDT', BTC: 'BTCUSDT', LTC: 'LTCUSDT', DOGE: 'DOGEUSDT', BCH: 'BCHUSDT',
-  SOL: 'SOLUSDT', BONK: 'BONKUSDT', XRP: 'XRPUSDT', ADA: 'ADAUSDT', TON: 'TONUSDT',
-  SUI: 'SUIUSDT', APT: 'APTUSDT', ATOM: 'ATOMUSDT', DOT: 'DOTUSDT'
+  SOL: 'SOLUSDT', BONK: 'BONKUSDT', XRP: 'XRPUSDT', ADA: 'ADAUSDT', TON: 'TONUSDT'
 };
 const GECKO = {
   ETH: 'ethereum', BNB: 'binancecoin', POL: 'polygon-ecosystem-token', AVAX: 'avalanche-2', TRX: 'tron',
   USDT: 'tether', USDC: 'usd-coin', SHIB: 'shiba-inu', PEPE: 'pepe', LBLOCK: 'lucky-block',
   BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin', BCH: 'bitcoin-cash', SOL: 'solana', BONK: 'bonk',
-  XRP: 'ripple', ADA: 'cardano', TON: 'the-open-network',
-  SUI: 'sui', APT: 'aptos', ATOM: 'cosmos', DOT: 'polkadot'
+  XRP: 'ripple', ADA: 'cardano', TON: 'the-open-network'
 };
 
 const cache = { USDT: { usd: 1, var24h: 0 } }; // símbolo -> { usd, var24h }

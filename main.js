@@ -22,19 +22,12 @@ const MOD = {
   solana: () => require('./src/solana'),
   xrp: () => require('./src/xrp'),
   ton: () => require('./src/ton'),
-  cardano: () => require('./src/cardano'),
-  sui: () => require('./src/sui'),
-  aptos: () => require('./src/aptos'),
-  cosmos: () => require('./src/cosmos'),
-  polkadot: () => require('./src/polkadot')
+  cardano: () => require('./src/cardano')
 };
 // redes de chave ed25519: caminho de derivação de cada uma (i = número da carteira)
 const CAMINHO_ED = {
   solana: (i) => `m/44'/501'/${i}'/0'`,
-  ton: (i) => `m/44'/607'/${i}'`,
-  sui: (i) => `m/44'/784'/${i}'/0'/0'`,
-  aptos: (i) => `m/44'/637'/${i}'/0'/0'`,
-  polkadot: (i) => `m/44'/354'/${i}'/0'/0'`
+  ton: (i) => `m/44'/607'/${i}'`
 };
 
 // Mantém os dados na mesma pasta de sempre, mesmo com o nome novo do programa
@@ -72,6 +65,7 @@ function writeJson(file, obj) {
   fs.renameSync(tmp, file);
 }
 
+const NOMES_CHAVES = ['alchemy', 'helius', 'toncenter', 'changenow', 'lifi', 'jupiter', 'exolix', 'simpleswap', 'stealthex', 'letsexchange', 'letsexchangeAfiliado'];
 function settings() {
   const s = readJson(cfgFile()) || {};
   const rpc = {};
@@ -82,13 +76,7 @@ function settings() {
     rpc,
     rpcProprio: s.rpc || {},
     tronApiKey: s.tronApiKey || '',
-    chaves: {
-      alchemy: s.chaves && s.chaves.alchemy ? alertas.decifrar(s.chaves.alchemy) : '',
-      helius: s.chaves && s.chaves.helius ? alertas.decifrar(s.chaves.helius) : '',
-      toncenter: s.chaves && s.chaves.toncenter ? alertas.decifrar(s.chaves.toncenter) : '',
-      changenow: s.chaves && s.chaves.changenow ? alertas.decifrar(s.chaves.changenow) : '',
-      lifi: s.chaves && s.chaves.lifi ? alertas.decifrar(s.chaves.lifi) : ''
-    },
+    chaves: Object.fromEntries(NOMES_CHAVES.map((k) => [k, s.chaves && s.chaves[k] ? alertas.decifrar(s.chaves[k]) : ''])),
     intervalo: Math.max(3, Number(s.intervalo) || 3),
     todasIntervalo: s.todasIntervalo != null ? s.todasIntervalo : 'auto',
     carteiraTaxas: s.carteiraTaxas != null ? Number(s.carteiraTaxas) : null,
@@ -146,8 +134,8 @@ function chaveRede(index, net) {
   if (k.soEvm) throw new Indisponivel('Carteira importada por chave privada: só funciona nas redes 0x (Ethereum, BNB, Polygon, Avalanche, Arbitrum, Base, Optimism) e Tron.');
   const m = Mnemonic.fromPhrase(k.frase);
   let chave;
-  if (net.kind === 'utxo' || net.kind === 'xrp' || net.kind === 'cosmos') {
-    const caminho = net.kind === 'xrp' ? "m/44'/144'/0'/0/" : net.kind === 'cosmos' ? "m/44'/118'/0'/0/" : MOD.utxo().REDES[net.coin].caminho;
+  if (net.kind === 'utxo' || net.kind === 'xrp') {
+    const caminho = net.kind === 'xrp' ? "m/44'/144'/0'/0/" : MOD.utxo().REDES[net.coin].caminho;
     const w = HDNodeWallet.fromMnemonic(m, caminho + k.d);
     chave = { priv: w.privateKey, pubkey: Buffer.from(getBytes(w.publicKey)) };
   } else if (CAMINHO_ED[net.kind]) {
@@ -708,14 +696,13 @@ handle('verificarEndereco', ({ assetId, endereco }) => {
   if (enderecoValidoPara(net, a)) {
     let msg = `Endereço válido da rede ${net.kind === 'evm' ? net.rotulo : net.rotulo}.`;
     if (net.kind === 'evm') msg += ` Endereços 0x servem para várias redes: confira se o destino aceita ${net.rotulo}.`;
-    if (net.kind === 'sui' || net.kind === 'aptos') msg += ` Endereços da Sui e da Aptos têm o mesmo formato: confira se o destino é mesmo da rede ${net.rotulo}.`;
     let meu = null;
     try {
       const data = readJson(dataFile());
       const w = data.wallets.find((x) => { try { return addressFor(x.index, net.id).toLowerCase() === a.toLowerCase(); } catch { return false; } });
       if (w) meu = w.name;
     } catch { /* ok */ }
-    return { estado: ['evm', 'sui', 'aptos'].includes(net.kind) ? 'atencao' : 'ok', mensagem: msg + (meu ? ` É a sua carteira "${meu}".` : '') };
+    return { estado: net.kind === 'evm' ? 'atencao' : 'ok', mensagem: msg + (meu ? ` É a sua carteira "${meu}".` : '') };
   }
   if (redes.length) {
     return { estado: 'bloqueado', mensagem: `Este endereço é da rede ${redes.join(' / ')}, mas você está enviando ${nomeMoeda}. Envio bloqueado: o dinheiro seria perdido.` };
@@ -819,6 +806,7 @@ handle('swapExecutar', async ({ quoteId, index, de, para, destinoIndex }) => {
 
 // ---------- Comparador de trocas (SideShift, THORChain, LI.FI, ChangeNOW) ----------
 const trocas = require('./src/trocas');
+const trocas2 = require('./src/trocas2');
 
 function brutoDe(asset, valorTxt) {
   const d = asset.decimals != null ? asset.decimals : 18;
@@ -854,9 +842,13 @@ handle('swapComparar', async ({ index, de, para, amount, destinoIndex }) => {
     },
     thorchain: () => trocas.thorCotar({ de: A.asset, para: B.asset, valorRaw: raw, decimaisDe: A.asset.decimals, destino }),
     lifi: () => trocas.lifiCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino, chave: ch.lifi }),
-    changenow: () => trocas.cnCotar({ de: A.asset, para: B.asset, valor, chave: ch.changenow })
+    changenow: () => trocas.cnCotar({ de: A.asset, para: B.asset, valor, chave: ch.changenow }),
+    jupiter: () => trocas2.jupCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino, chave: ch.jupiter }),
+    stonfi: () => trocas2.stonCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino }),
+    debridge: () => trocas2.dlnCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino }),
+    ...Object.fromEntries(Object.entries(trocas2.DEPOSITO).map(([id, p]) => [id, () => p.cotar({ de: A.asset, para: B.asset, valor, chave: ch[id], afiliado: ch.letsexchangeAfiliado })]))
   };
-  const NOMES = { sideshift: 'SideShift', thorchain: 'THORChain', lifi: 'LI.FI', changenow: 'ChangeNOW' };
+  const NOMES = NOMES_TROCA;
   const res = await Promise.allSettled(Object.entries(provedores).map(async ([id, fn]) => ({ id, q: await comTempo(fn(), 25000) })));
   const cotacoes = [];
   const fora = [];
@@ -878,6 +870,11 @@ handle('swapComparar', async ({ index, de, para, amount, destinoIndex }) => {
   };
 });
 
+const NOMES_TROCA = {
+  sideshift: 'SideShift', thorchain: 'THORChain', lifi: 'LI.FI', changenow: 'ChangeNOW', jupiter: 'Jupiter', stonfi: 'STON.fi',
+  debridge: 'deBridge', exolix: 'Exolix', simpleswap: 'SimpleSwap', stealthex: 'StealthEX', letsexchange: 'LetsExchange'
+};
+
 // Quais moedas dá para trocar a partir de uma moeda, e por qual serviço
 let paresCache = { t: 0 };
 async function listasDeTroca() {
@@ -897,7 +894,14 @@ async function listasDeTroca() {
 handle('swapPares', async ({ assetId }) => {
   const A = getAsset(assetId);
   const L = await listasDeTroca();
-  const temChaveCn = !!settings().chaves.changenow;
+  const chs = settings().chaves;
+  const temChaveCn = !!chs.changenow;
+  const vistos = {};
+  const temNaLista = async (id, a) => {
+    const k = id + '|' + a.id;
+    if (vistos[k] == null) vistos[k] = await trocas2.achar[id](chs[id], a, chs.letsexchangeAfiliado).then(() => true, () => false);
+    return vistos[k];
+  };
   const ssDe = (a) => {
     if (!L.ss) return false;
     const rede = swap.REDE[a.network];
@@ -922,6 +926,15 @@ handle('swapPares', async ({ assetId }) => {
     }
     if (origem.lifi && trocas.LIFI_CHAIN[b.network]) servicos.push({ nome: 'LI.FI', estado: 'ok' });
     if (origem.changenow && await cnDe(b)) servicos.push({ nome: 'ChangeNOW', estado: temChaveCn ? 'ok' : 'chave' });
+    if (A.net.id === 'solana' && b.network === 'solana') servicos.push({ nome: 'Jupiter', estado: 'ok' });
+    if (A.net.id === 'ton' && b.network === 'ton') servicos.push({ nome: 'STON.fi', estado: 'ok' });
+    if (trocas2.DLN_CHAIN[A.net.id] && trocas2.DLN_CHAIN[b.network] && A.net.id !== b.network) servicos.push({ nome: 'deBridge', estado: 'ok' });
+    const exo = (a) => trocas2.EXO_REDE[a.network] && !(a.network === 'ton' && a.native) && a.id !== 'lblock';
+    if (exo(A.asset) && exo(b)) servicos.push({ nome: 'Exolix', estado: 'ok' });
+    for (const [id, nome] of [['simpleswap', 'SimpleSwap'], ['stealthex', 'StealthEX'], ['letsexchange', 'LetsExchange']]) {
+      if (!chs[id]) continue;
+      if (await temNaLista(id, A.asset) && await temNaLista(id, b)) servicos.push({ nome, estado: 'ok' });
+    }
     lista.push({ assetId: b.id, symbol: b.symbol, rede: NETWORKS[b.network].rotulo, servicos });
   }
   lista.sort((x, y) => (y.servicos.some((s) => s.estado === 'ok') - x.servicos.some((s) => s.estado === 'ok')) || x.symbol.localeCompare(y.symbol));
@@ -929,6 +942,8 @@ handle('swapPares', async ({ assetId }) => {
   if (!L.ss) avisos.push('SideShift não respondeu' + (L.ssErro ? ': ' + L.ssErro.slice(0, 80) : ''));
   if (!L.cn) avisos.push('ChangeNOW não respondeu' + (L.cnErro ? ': ' + L.cnErro.slice(0, 80) : ''));
   if (!L.thor) avisos.push('THORChain não respondeu');
+  const semChave = [['simpleswap', 'SimpleSwap'], ['stealthex', 'StealthEX'], ['letsexchange', 'LetsExchange']].filter(([id]) => !chs[id]).map(([, n]) => n);
+  if (semChave.length) avisos.push(`${semChave.join(', ')} só aparecem aqui depois de colar a chave em Configurações → Chaves de API.`);
   if (!temChaveCn) avisos.push('ChangeNOW aparece com 🔑: os pares existem, mas para cotar precisa colar a chave em Configurações → Chaves de API.');
   return { de: `${A.asset.symbol} (${A.net.rotulo})`, origem, lista, avisos };
 });
@@ -980,6 +995,60 @@ handle('swapExecutarProvedor', async ({ provedor, dados, index, de, para, amount
     }
   }
 
+  // serviços com endereço de depósito (Exolix, SimpleSwap, StealthEX, LetsExchange)
+  if (trocas2.DEPOSITO[provedor]) {
+    const P = trocas2.DEPOSITO[provedor];
+    const ex = await P.criar({ chave: ch[provedor], afiliado: ch.letsexchangeAfiliado, dados, valor, destino, reembolso: addressFor(Number(index), A.net.id) });
+    const idAtiv = registrar({ ...base, paraValor: ex.recebe, provedor: P.nome, status: 'enviando depósito', explorer: ex.pagina, hash: ex.id });
+    await runTransfer('send', { index, assetId: de, to: ex.deposito, amount: valor, memo: ex.depositoExtra || undefined });
+    acompanharTrocaGenerica(() => P.status(ch[provedor], ex.id), idAtiv, textoPara);
+    return { pagina: ex.pagina, envia: valor, recebe: ex.recebe };
+  }
+
+  if (provedor === 'jupiter') {
+    const origem = addressFor(Number(index), A.net.id);
+    const q = await trocas2.jupCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino, chave: ch.jupiter });
+    const tx = await trocas2.jupTransacao({ quote: q.dados.quote, usuario: origem, chave: ch.jupiter });
+    const cfg = cfgRede(A.net);
+    const hash = await MOD.solana().executarLifi(cfg, chaveRede(Number(index), A.net), tx);
+    const pagina = linkExplorer(A.net, hash);
+    const idAtiv = registrar({ ...base, paraValor: String(q.recebe), provedor: 'Jupiter', status: 'trocando', explorer: pagina, hash });
+    acompanharTrocaGenerica(async () => { const r = await MOD.solana().confirmar(cfg, hash); return { status: r === 'ok' ? 'concluída' : r === 'falhou' ? 'falhou' : 'trocando' }; }, idAtiv, textoPara);
+    setTimeout(() => reverificar([Number(index)]).catch(() => {}), 15000);
+    return { pagina, envia: valor, recebe: String(q.recebe) };
+  }
+
+  if (provedor === 'stonfi') {
+    const origem = addressFor(Number(index), A.net.id);
+    const q = await trocas2.stonCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino });
+    const cfg = cfgRede(A.net);
+    const chave = chaveRede(Number(index), A.net);
+    const msg = await trocas2.stonMensagem({ de: A.asset, para: B.asset, sim: q.dados.sim, usuario: origem, tonClient: MOD.ton().client(cfg) });
+    const ref = await MOD.ton().enviarMensagem({ cfg, chave, to: msg.to, value: msg.value, body: msg.body });
+    const pagina = linkExplorer(A.net, ref);
+    const idAtiv = registrar({ ...base, paraValor: String(q.recebe), provedor: 'STON.fi', status: 'trocando', explorer: pagina, hash: ref });
+    acompanharTrocaGenerica(async () => { const r = await MOD.ton().confirmar(cfg, ref, chave.seed32); return { status: r === 'ok' ? 'concluída' : 'trocando' }; }, idAtiv, textoPara);
+    setTimeout(() => reverificar([Number(index)]).catch(() => {}), 40000);
+    return { pagina, envia: valor, recebe: String(q.recebe) };
+  }
+
+  if (provedor === 'debridge') {
+    const origem = addressFor(Number(index), A.net.id);
+    const q = await trocas2.dlnCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino });
+    let hash;
+    if (A.net.kind === 'evm') {
+      hash = await evm.executarLifi({ net: A.net, url: cfgRede(A.net).rpc, wallet: keysFor(Number(index)).evm, asset: A.asset, txReq: q.dados.tx, aprovarPara: q.dados.tx.allowanceTarget || q.dados.tx.to, valor: raw });
+    } else if (A.net.kind === 'solana') {
+      const b64 = Buffer.from(String(q.dados.tx.data).replace(/^0x/, ''), 'hex').toString('base64');
+      hash = await MOD.solana().executarLifi(cfgRede(A.net), chaveRede(Number(index), A.net), b64);
+    } else throw new Error('Rede não suportada pela deBridge.');
+    const pagina = `https://app.debridge.finance/order?orderId=${q.dados.orderId || ''}`;
+    const idAtiv = registrar({ ...base, paraValor: String(q.recebe), provedor: 'deBridge', status: 'trocando', explorer: q.dados.orderId ? pagina : linkExplorer(A.net, hash), hash });
+    acompanharTrocaGenerica(async () => ({ status: await trocas2.dlnStatus(hash) }), idAtiv, textoPara);
+    setTimeout(() => reverificar([Number(index)]).catch(() => {}), 30000);
+    return { pagina: q.dados.orderId ? pagina : linkExplorer(A.net, hash), envia: valor, recebe: String(q.recebe) };
+  }
+
   if (provedor === 'changenow') {
     const ex = await trocas.cnCriar({ chave: ch.changenow, a: dados.a, b: dados.b, valor, destino, reembolso: addressFor(Number(index), A.net.id) });
     if (!ex.payinAddress) throw new Error('A ChangeNOW não devolveu o endereço de depósito: ' + (ex.message || ''));
@@ -1000,9 +1069,6 @@ handle('swapExecutarProvedor', async ({ provedor, dados, index, de, para, amount
     } else if (A.net.kind === 'evm') {
       if (!q.dados.router) throw new Error('A THORChain não informou o roteador desta rede.');
       hash = await evm.depositarThorchain({ net: A.net, url: cfgRede(A.net).rpc, wallet: keysFor(Number(index)).evm, asset: A.asset, router: q.dados.router, vault: q.dados.inbound, valor: raw, memo: q.dados.memo, expiry: q.dados.expiry });
-    } else if (A.net.kind === 'cosmos') {
-      const r = await MOD.cosmos().enviar({ cfg: cfgRede(A.net), asset: A.asset, chave: chaveRede(Number(index), A.net), to: q.dados.inbound, valorRaw: raw, memo: q.dados.memo });
-      hash = r.hash;
     } else throw new Error('Envio para a THORChain a partir desta rede ainda não é suportado.');
     const pagina = `https://thorchain.net/tx/${String(hash).replace(/^0x/, '')}`;
     const idAtiv = registrar({ ...base, paraValor: String(q.recebe), provedor: 'THORChain', status: 'aguardando a rede', explorer: pagina, hash });
@@ -1424,13 +1490,7 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteira
   writeJson(cfgFile(), {
     rpc: clean,
     tronApiKey: String(tronApiKey || '').trim(),
-    chaves: {
-      alchemy: alertas.cifrar(String((chaves && chaves.alchemy) || '').trim()),
-      helius: alertas.cifrar(String((chaves && chaves.helius) || '').trim()),
-      toncenter: alertas.cifrar(String((chaves && chaves.toncenter) || '').trim()),
-      changenow: alertas.cifrar(String((chaves && chaves.changenow) || '').trim()),
-      lifi: alertas.cifrar(String((chaves && chaves.lifi) || '').trim())
-    },
+    chaves: Object.fromEntries(NOMES_CHAVES.map((k) => [k, alertas.cifrar(String((chaves && chaves[k]) || '').trim())])),
     swap: (readJson(cfgFile()) || {}).swap,
     intervalo: Math.max(3, Number(intervalo) || 3),
     todasIntervalo: ['auto', 'rodizio'].includes(todasIntervalo) ? todasIntervalo : Math.max(10, Number(todasIntervalo) || 30),
@@ -1477,6 +1537,10 @@ handle('testarChaves', async ({ chaves, tronApiKey }) => {
       const r = await fetch('https://api.changenow.io/v2/exchange/min-amount?fromCurrency=btc&toCurrency=eth&fromNetwork=btc&toNetwork=eth&flow=standard', { headers: { 'x-changenow-api-key': k.changenow.trim() }, signal: AbortSignal.timeout(15000) });
       out.ChangeNOW = r.ok ? 'ok' : 'erro: HTTP ' + r.status + ' ' + (await r.text()).slice(0, 100);
     } catch (e) { out.ChangeNOW = 'erro: ' + e.message; }
+  }
+  for (const [id, nome] of [['jupiter', 'Jupiter'], ['simpleswap', 'SimpleSwap'], ['stealthex', 'StealthEX'], ['letsexchange', 'LetsExchange']]) {
+    if (!String(k[id] || '').trim()) continue;
+    try { out[nome] = 'ok: ' + await trocas2.testarChave(id, k[id].trim(), String(k.letsexchangeAfiliado || '').trim()); } catch (e) { out[nome] = 'erro: ' + e.message.slice(0, 120); }
   }
   if (!Object.keys(out).length) throw new Error('Preencha pelo menos uma chave.');
   return out;
@@ -1589,16 +1653,12 @@ app.whenReady().then(() => {
           await t('estimar ton', async () => c('estimate', { index: 0, assetId: 'ton', to: await dest2('ton'), amount: '0.1' }));
           await t('estimar sol->janio2', async () => c('estimate', { index: 0, assetId: 'sol', to: await dest2('sol'), amount: '0.01', velocidade: 'rapida' }));
           await t('estimar bonk', async () => c('estimate', { index: 0, assetId: 'bonk', to: await dest2('sol'), amount: '1' }));
-          for (const id of ['sui', 'apt', 'atom', 'dot', 'eth-arb', 'eth-base', 'eth-op']) await t('endereco ' + id, async () => (await c('receive', { index: 0, assetId: id })).address);
-          for (const id of ['sui', 'apt', 'atom', 'dot']) await t('estimar ' + id, async () => c('estimate', { index: 0, assetId: id, to: await dest2(id), amount: '0.001' }));
+          for (const id of ['eth-arb', 'eth-base', 'eth-op', 'usdt-ton', 'usdt-sol']) await t('endereco ' + id, async () => (await c('receive', { index: 0, assetId: id })).address);
           await t('estimar eth-base', () => c('estimate', { index: 0, assetId: 'eth-base', to: '0x000000000000000000000000000000000000dEaD', amount: '0.0001' }));
           await t('estimar usdc-arb', () => c('estimate', { index: 0, assetId: 'usdc-arb', to: '0x000000000000000000000000000000000000dEaD', amount: '1' }));
-          await t('evm em aptos bloqueado', async () => (await c('verificarEndereco', { assetId: 'apt', endereco: '0x000000000000000000000000000000000000dEaD' })).estado);
           await t('pares ton', async () => { const r = await c('swapPares', { assetId: 'ton' }); return r.lista.filter(x => x.servicos.length).length + ' pares; ex: ' + r.lista.slice(0, 4).map(x => x.symbol + '/' + x.rede + ':' + x.servicos.map(s => s.nome + '=' + s.estado).join('+')).join(' ; ') + ' avisos: ' + r.avisos.join(' | '); });
-          await t('pares atom', async () => { const r = await c('swapPares', { assetId: 'atom' }); return r.lista.filter(x => x.servicos.length).length + ' pares; origem ' + JSON.stringify(r.origem); });
-          await t('pares sui', async () => { const r = await c('swapPares', { assetId: 'sui' }); return r.lista.filter(x => x.servicos.length).length + ' pares; origem ' + JSON.stringify(r.origem); });
-          for (const [de, para, v] of [['usdc-base', 'sol', '50'], ['eth-arb', 'usdc-op', '0.02'], ['atom', 'btc', '40'], ['usdc-arb', 'sui', '50'], ['dot', 'usdt-tron', '50'], ['apt', 'eth', '80']]) {
-            await t('cotar ' + de + '->' + para, async () => { const r = await c('swapComparar', { index: 0, de, para, amount: v, destinoIndex: 1 }); return r.cotacoes.map(q => q.nome + '=' + q.recebe).join(' ; ') + ' | fora: ' + r.fora.map(f => f.nome + ':' + f.motivo.slice(0, 50)).join(' ; '); });
+          for (const [de, para, v, di] of [['usdc-base', 'sol', '50', 1], ['eth-arb', 'usdc-op', '0.02', 1], ['usdc-arb', 'usdt-sol', '50', 1], ['ton', 'usdt-ton', '20', 0], ['usdt-ton', 'ton', '20', 0], ['sol', 'bonk', '0.5', 0], ['sol', 'usdc-sol', '0.5', 0], ['usdt-bsc', 'sol', '50', 1], ['ton', 'usdt-tron', '20', 1], ['xrp', 'usdt-tron', '30', 1], ['btc', 'eth', '0.01', 1]]) {
+            await t('cotar ' + de + '->' + para, async () => { const r = await c('swapComparar', { index: 0, de, para, amount: v, destinoIndex: di }); return r.cotacoes.map(q => q.nome + '=' + q.recebe).join(' ; ') + ' | fora: ' + r.fora.map(f => f.nome + ':' + f.motivo.slice(0, 50)).join(' ; '); });
           }
           await t('tela pares', async () => { await abrirPares('ton'); await new Promise(r => setTimeout(r, 6000)); const n = document.querySelectorAll('#p-lista tbody tr').length; fecharModal(); return n + ' linhas'; });
           await t('assinar utxo', () => c('testeAssinar'));

@@ -69,26 +69,6 @@ const NETWORKS = {
     id: 'cardano', rotulo: 'Cardano', name: 'Cardano', kind: 'cardano', symbol: 'ADA',
     standard: 'Cardano', rpc: 'https://api.koios.rest/api/v1', explorer: 'https://cardanoscan.io/transaction/', lento: 30000
   },
-  sui: {
-    id: 'sui', rotulo: 'Sui', name: 'Sui', kind: 'sui', symbol: 'SUI',
-    standard: 'Sui', rpc: 'https://fullnode.mainnet.sui.io:443',
-    explorer: 'https://suiscan.xyz/mainnet/tx/', lento: 10000
-  },
-  aptos: {
-    id: 'aptos', rotulo: 'Aptos', name: 'Aptos', kind: 'aptos', symbol: 'APT',
-    standard: 'Aptos', rpc: 'https://api.mainnet.aptoslabs.com/v1',
-    explorer: 'https://explorer.aptoslabs.com/txn/', explorerFim: '?network=mainnet', lento: 15000
-  },
-  cosmos: {
-    id: 'cosmos', rotulo: 'Cosmos Hub', name: 'Cosmos Hub', kind: 'cosmos', symbol: 'ATOM', memo: 'memo',
-    standard: 'Cosmos', rpc: 'https://cosmos-rpc.publicnode.com:443', reserva: ['https://rpc.cosmos.directory/cosmoshub'],
-    explorer: 'https://www.mintscan.io/cosmos/tx/', lento: 15000
-  },
-  polkadot: {
-    id: 'polkadot', rotulo: 'Polkadot (Asset Hub)', name: 'Polkadot Asset Hub', kind: 'polkadot', symbol: 'DOT',
-    standard: 'Polkadot', rpc: 'wss://polkadot-asset-hub-rpc.polkadot.io', reserva: ['wss://asset-hub-polkadot-rpc.n.dwellir.com'],
-    explorer: 'https://assethub-polkadot.subscan.io/extrinsic/', lento: 20000
-  },
   tron: {
     id: 'tron', rotulo: 'Tron (TRC-20)', name: 'Tron', kind: 'tron', symbol: 'TRX',
     standard: 'TRC-20', rpc: 'https://api.trongrid.io',
@@ -130,6 +110,7 @@ const ASSETS = [
   { id: 'pepe', symbol: 'PEPE', name: 'Pepe',      network: 'ethereum', contract: '0x6982508145454Ce325dDbE47a25d4ec3d2311933', decimals: 18 },
   { id: 'bonk', symbol: 'BONK', name: 'Bonk',      network: 'solana',   contract: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5 },
   { id: 'ton',  symbol: 'TON',  name: 'Toncoin',   network: 'ton',      native: true, decimals: 9 },
+  { id: 'usdt-ton', symbol: 'USDT', name: 'Tether', network: 'ton', contract: 'EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs', decimals: 6 },
 
   // Redes de segunda camada do Ethereum (mesmo endereço 0x...)
   { id: 'eth-arb',  symbol: 'ETH',  name: 'Ethereum', network: 'arbitrum', native: true, decimals: 18 },
@@ -141,11 +122,9 @@ const ASSETS = [
   { id: 'usdc-op', symbol: 'USDC', name: 'USD Coin', network: 'optimism', contract: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals: 6 },
   { id: 'usdt-op', symbol: 'USDT', name: 'Tether',   network: 'optimism', contract: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 6 },
 
-  // Redes novas
-  { id: 'sui',  symbol: 'SUI',  name: 'Sui',      network: 'sui',      native: true, decimals: 9 },
-  { id: 'apt',  symbol: 'APT',  name: 'Aptos',    network: 'aptos',    native: true, decimals: 8 },
-  { id: 'atom', symbol: 'ATOM', name: 'Cosmos',   network: 'cosmos',   native: true, decimals: 6 },
-  { id: 'dot',  symbol: 'DOT',  name: 'Polkadot', network: 'polkadot', native: true, decimals: 10 }
+  // USDT e USDC na Solana
+  { id: 'usdt-sol', symbol: 'USDT', name: 'Tether',   network: 'solana', contract: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6 },
+  { id: 'usdc-sol', symbol: 'USDC', name: 'USD Coin', network: 'solana', contract: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 }
 ];
 
 module.exports = { NETWORKS, ASSETS };
