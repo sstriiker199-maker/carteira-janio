@@ -270,3 +270,11 @@ table.cot tr.melhor b { color: var(--ouro); }
 details.ajuda summary { cursor: pointer; }
 .link-pequeno { float: right; font-size: 12px; color: var(--ouro); font-weight: normal; letter-spacing: 0; }
 .barra-dir { display: flex; gap: 16px; align-items: center; }
+
+/* acabamentos */
+.tanque:has(#tq-escolher) { border: 0; padding: 0; background: none; }
+#tq-escolher { margin: 0; border: 1px dashed #3b362e; border-radius: 14px; color: var(--mut); padding: 11px 12px; font-size: 13px; background: transparent; }
+#tq-escolher:hover { color: var(--ouro); border-color: var(--ouro); background: var(--ouro-fundo); }
+.acoes button { padding: 8px 14px; font-size: 13.5px; }
+.cc-end code { font-size: 11px; letter-spacing: .02em; }
+.cc-end + .cc-end { margin-top: 6px; }
