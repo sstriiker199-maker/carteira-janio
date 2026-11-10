@@ -1,0 +1,25 @@
+const log = (...a) => console.log('SONDA', ...a.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).map((x) => x.slice(0, 1800)));
+const t = async (nome, fn) => { try { log(nome, '=>', await fn()); } catch (e) { log(nome, 'ERRO', String(e && (e.message || e)).slice(0, 400)); } };
+const get = async (u, o = {}) => { const r = await fetch(u, { ...o, headers: { accept: 'application/json', 'content-type': 'application/json', ...(o.headers || {}) }, signal: AbortSignal.timeout(20000) }); const tx = await r.text(); try { return { s: r.status, j: JSON.parse(tx) }; } catch { return { s: r.status, txt: tx.slice(0, 300) }; } };
+(async () => {
+  await t('exolix rate', async () => (await get('https://exolix.com/api/v2/rate?coinFrom=TON&networkFrom=TON&coinTo=USDT&networkTo=TRX&amount=20&rateType=float')));
+  await t('exolix redes', async () => {
+    const out = {};
+    for (const c of ['BTC', 'ETH', 'USDT', 'USDC', 'BNB', 'POL', 'AVAX', 'TRX', 'SOL', 'XRP', 'TON', 'ADA', 'LTC', 'DOGE', 'BCH', 'SHIB', 'PEPE', 'BONK', 'SUI', 'APT', 'ATOM', 'DOT']) {
+      const r = await get(`https://exolix.com/api/v2/currencies/${c}/networks`);
+      out[c] = Array.isArray(r.j) ? r.j.map((n) => n.network + (n.contract ? '@' + String(n.contract).slice(0, 8) : '') + (n.memoNeeded ? '(memo)' : '')).join(',') : r.s;
+    }
+    return out;
+  });
+  await t('simpleswap sem chave', async () => (await get('https://api.simpleswap.io/get_all_currencies')).s);
+  await t('jupiter lite', async () => { const r = await get('https://lite-api.jup.ag/swap/v1/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263&amount=100000000&slippageBps=50'); return { s: r.s, out: r.j && r.j.outAmount, keys: r.j && Object.keys(r.j).join(',') }; });
+  await t('jupiter api sem chave', async () => (await get('https://api.jup.ag/swap/v1/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263&amount=100000000&slippageBps=50')).s);
+  await t('debridge', async () => { const r = await get('https://dln.debridge.finance/v1.0/dln/order/create-tx?srcChainId=56&srcChainTokenIn=0x55d398326f99059fF775485246999027B3197955&srcChainTokenInAmount=50000000000000000000&dstChainId=7565164&dstChainTokenOut=11111111111111111111111111111111&dstChainTokenOutAmount=auto&prependOperatingExpenses=true&dstChainTokenOutRecipient=HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk&senderAddress=0x9858EfFD232B4033E47d90003D41EC34EcaEda94&srcChainOrderAuthorityAddress=0x9858EfFD232B4033E47d90003D41EC34EcaEda94&dstChainOrderAuthorityAddress=HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk'); return { s: r.s, err: r.j && (r.j.errorMessage || r.j.errorId), out: r.j && r.j.estimation && r.j.estimation.dstChainTokenOut, tx: r.j && r.j.tx && Object.keys(r.j.tx).join(','), txTo: r.j && r.j.tx && r.j.tx.to, fix: r.j && r.j.fixFee, orderId: r.j && r.j.orderId, keys: r.j && Object.keys(r.j).join(',') }; });
+  await t('debridge sol->bsc', async () => { const r = await get('https://dln.debridge.finance/v1.0/dln/order/create-tx?srcChainId=7565164&srcChainTokenIn=11111111111111111111111111111111&srcChainTokenInAmount=500000000&dstChainId=56&dstChainTokenOut=0x55d398326f99059fF775485246999027B3197955&dstChainTokenOutAmount=auto&prependOperatingExpenses=true&dstChainTokenOutRecipient=0x9858EfFD232B4033E47d90003D41EC34EcaEda94&senderAddress=HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk&srcChainOrderAuthorityAddress=HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk&dstChainOrderAuthorityAddress=0x9858EfFD232B4033E47d90003D41EC34EcaEda94'); return { s: r.s, err: r.j && (r.j.errorMessage || r.j.errorId), out: r.j && r.j.estimation && r.j.estimation.dstChainTokenOut && r.j.estimation.dstChainTokenOut.amount, tx: r.j && r.j.tx && Object.keys(r.j.tx).join(','), dataIni: r.j && r.j.tx && String(r.j.tx.data).slice(0, 20) }; });
+  await t('debridge status', async () => (await get('https://dln.debridge.finance/v1.0/dln/tx/0x3fe11542154f53dcf3134eacb30ea5ca586c9e134c223e56bbe1893862469bc5/order-ids')));
+  await t('stonfi assets usdt', async () => { const r = await get('https://api.ston.fi/v1/assets/EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs'); return { s: r.s, a: r.j && r.j.asset && { sym: r.j.asset.symbol, dec: r.j.asset.decimals } }; });
+  await t('stonfi simulate TON->USDT', async () => { const r = await get('https://api.ston.fi/v1/swap/simulate?offer_address=EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c&ask_address=EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs&units=10000000000&slippage_tolerance=0.01&dex_v2=true', { method: 'POST' }); return { s: r.s, j: r.j }; });
+  await t('toncenter jetton wallet', async () => (await get('https://toncenter.com/api/v3/jetton/wallets?owner_address=UQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPrHF&jetton_address=EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs&limit=1')));
+  await t('sideshift usdt ton', async () => { const r = await get('https://sideshift.ai/api/v2/coins'); const u = r.j.find((c) => c.coin === 'USDT'); return u && u.tokenDetails && u.tokenDetails.ton; });
+  process.exit(0);
+})();
