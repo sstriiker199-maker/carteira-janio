@@ -1,7 +1,1 @@
-{ "name": "sonda-libs", "private": true, "dependencies": {
-  "@mysten/sui": "latest",
-  "@polkadot/api": "^16.4.0",
-  "@polkadot/keyring": "^14.0.1",
-  "@polkadot/util-crypto": "^14.0.1",
-  "ethers": "^6.13.0"
-} }
+{ "name": "sonda-libs", "private": true, "dependencies": { "@mysten/sui": "^2.39.1" } }
