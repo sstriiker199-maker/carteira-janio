@@ -411,8 +411,12 @@ async function receber(assetId) {
       ${r.aviso ? `<p class="alerta">${esc(r.aviso)}</p>` : ''}
       <img class="qr" src="${r.qr}" width="240" height="240" alt="QR Code">
       <div class="end-grande"><code>${esc(r.address)}</code></div>
+      ${r.memo ? `<label>${r.memo.tipo === 'tag' ? 'Tag de destino (Destination Tag)' : 'Memo / Comentário'} desta carteira</label>
+        <div class="end-grande"><code>${esc(r.memo.valor)}</code> <button class="mini" id="m-copiar-memo">Copiar</button></div>
+        <p class="ajuda">Opcional. Use se a corretora obrigar a preencher ${r.memo.tipo === 'tag' ? 'a tag' : 'o memo'} no saque. Com ou sem ${r.memo.tipo === 'tag' ? 'tag' : 'memo'}, o dinheiro chega nesta carteira.</p>` : ''}
       <div class="linha"><button id="m-copiar" class="primario">Copiar endereço</button><button id="m-fechar">Fechar</button></div>`);
     $('m-copiar').onclick = async () => { await rpc('copy', { text: r.address }); aviso('Endereço copiado'); };
+    if ($('m-copiar-memo')) $('m-copiar-memo').onclick = async () => { await rpc('copy', { text: r.memo.valor }); aviso(r.memo.tipo === 'tag' ? 'Tag copiada' : 'Memo copiado'); };
     $('m-fechar').onclick = fecharModal;
   } catch (e) { aviso(e.message); }
 }

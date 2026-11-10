@@ -846,7 +846,13 @@ handle('receive', async ({ index, assetId }) => {
   const { asset, net } = getAsset(assetId);
   const address = addressFor(index, net.id);
   const qr = await QRCode.toDataURL(address, { margin: 1, width: 240 });
-  return { address, qr, symbol: asset.symbol, networkName: net.name, standard: net.standard, aviso: asset.aviso || '' };
+  // XRP/TON: tag/memo fixo desta carteira (opcional; útil quando a corretora obriga a preencher)
+  let memo = null;
+  if (net.memo) {
+    const h = require('crypto').createHash('sha256').update(address).digest();
+    memo = { tipo: net.memo, valor: String(100000000 + (h.readUInt32BE(0) % 900000000)) };
+  }
+  return { address, qr, symbol: asset.symbol, networkName: net.name, standard: net.standard, aviso: asset.aviso || '', memo };
 });
 
 function usdDe(symbol, raw, decimals) {
@@ -1207,6 +1213,8 @@ app.whenReady().then(() => {
           await t('servidores bsc', async () => 'ok');
           await t('testar chaves falsas', () => c('testarChaves', { chaves: { alchemy: 'chave-falsa', helius: 'chave-falsa', toncenter: 'falsa' }, tronApiKey: 'falsa' }));
           await t('salvar chave falsa e ver reserva', async () => { await c('saveSettings', { rpc: {}, tronApiKey: '', intervalo: 3, notificar: {}, email: {}, carteiraTaxas: '', chaves: { alchemy: 'chave-falsa', helius: 'chave-falsa', toncenter: '' } }); return [await c('balance', { index: 0, assetId: 'usdt-bsc' }), await c('balance', { index: 0, assetId: 'sol' })]; });
+          await t('receber xrp com tag', async () => { const r = await c('receive', { index: 0, assetId: 'xrp' }); return r.address + ' tag ' + JSON.stringify(r.memo); });
+          await t('receber ton com memo', async () => (await c('receive', { index: 0, assetId: 'ton' })).memo);
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
