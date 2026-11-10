@@ -1,6 +1,6 @@
 {
   "name": "carteira-janio",
-  "productName": "Wallet - Trabalho",
+  "productName": "Wallet Pessoal",
   "version": "0.7.0",
   "description": "Carteira de criptomoedas com várias carteiras",
   "author": "Janio",
@@ -36,11 +36,14 @@
   "devDependencies": {
     "electron": "^37.0.0",
     "electron-builder": "^26.0.0",
-    "cryptocurrency-icons": "^0.18.1"
+    "cryptocurrency-icons": "^0.18.1",
+    "@fontsource/inter": "^5.1.0",
+    "@fontsource/outfit": "^5.1.0",
+    "@fontsource/jetbrains-mono": "^5.1.0"
   },
   "build": {
     "appId": "com.janio.carteira",
-    "productName": "Wallet - Trabalho",
+    "productName": "Wallet Pessoal",
     "files": [
       "main.js",
       "preload.js",
@@ -50,14 +53,14 @@
     ],
     "win": {
       "target": "nsis",
-      "artifactName": "Wallet-Trabalho-Setup-${version}.${ext}",
+      "artifactName": "Wallet-Pessoal-Setup-${version}.${ext}",
       "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Wallet - Trabalho"
+      "shortcutName": "Wallet Pessoal"
     },
     "publish": [
       {

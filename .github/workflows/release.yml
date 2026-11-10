@@ -99,5 +99,5 @@ jobs:
           DEST=sstriiker199-maker/carteira-janio-atualizacoes
           ls dist
           gh release delete "v$V" -R "$DEST" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "v$V" -R "$DEST" --title "v$V" --notes "Versão $V do Wallet - Trabalho" --latest \
+          gh release create "v$V" -R "$DEST" --title "v$V" --notes "Versão $V do Wallet Pessoal" --latest \
             dist/*.exe dist/*.exe.blockmap dist/latest.yml

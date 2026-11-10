@@ -1567,7 +1567,7 @@ handle('testarChaves', async ({ chaves, tronApiKey }) => {
 
 handle('testarEmail', async ({ email }) => {
   const em = montarEmail(email, settings().email);
-  await alertas.enviarEmail({ ...em, senha: alertas.decifrar(em.senhaCifrada) }, '[Wallet - Trabalho] E-mail de teste', 'Se você recebeu este e-mail, os avisos da Wallet - Trabalho estão funcionando.');
+  await alertas.enviarEmail({ ...em, senha: alertas.decifrar(em.senhaCifrada) }, '[Wallet Pessoal] E-mail de teste', 'Se você recebeu este e-mail, os avisos da Wallet Pessoal estão funcionando.');
   return true;
 });
 
@@ -1585,8 +1585,8 @@ function createWindow() {
     height: 780,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#14161c',
-    title: 'Wallet - Trabalho',
+    backgroundColor: '#111111',
+    title: 'Wallet Pessoal',
     icon: path.join(__dirname, 'renderer', 'app-icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
@@ -1730,6 +1730,25 @@ app.whenReady().then(() => {
           return out;
         })()`);
         for (const x of r) log('[teste] ' + x.slice(0, 300));
+        // Fotos das telas (o GitHub guarda para conferir o visual)
+        const pasta = process.env.TELAS_DIR || path.join(process.cwd(), 'telas');
+        fs.mkdirSync(pasta, { recursive: true });
+        win.setSize(1440, 900);
+        const foto = async (nome, js, espera = 1500) => {
+          try {
+            if (js) await win.webContents.executeJavaScript(js);
+            await new Promise((res) => setTimeout(res, espera));
+            const img = await win.webContents.capturePage();
+            fs.writeFileSync(path.join(pasta, nome + '.png'), img.toPNG());
+          } catch (e) { log('[teste] foto ' + nome + ': ' + e.message); }
+        };
+        await foto('1-principal', 'fecharModal(); selecionar(carteiras[0].index); true', 6000);
+        await foto('2-principal-saldo', "document.getElementById('so-com-saldo').click(); true", 1500);
+        await foto('3-trocar', "document.getElementById('so-com-saldo').click(); document.getElementById('btn-trocar').onclick(); true", 2000);
+        await foto('4-favoritos', "fecharModal(); document.getElementById('btn-contatos').onclick(); true", 3000);
+        await foto('5-config', "fecharModal(); document.getElementById('btn-config').onclick(); true", 2000);
+        await foto('6-mercado', "fecharModal(); document.getElementById('btn-mercado').onclick(); true", 4000);
+        await foto('7-bloqueio', "fecharModal(); telaBloqueada('🔒 Bloqueada automaticamente após 15 min sem uso. Digite a senha para continuar.'); true", 1200);
       } catch (e) { log('[teste] erro: ' + e.message); }
       app.quit();
     }, 5000);

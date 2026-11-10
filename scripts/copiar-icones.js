@@ -24,6 +24,29 @@ for (const s of SIMBOLOS) {
 }
 console.log('Ícones copiados: ' + copiados.join(', '));
 
+// Fontes do visual (ficam dentro do programa; sem internet)
+const FONTES = {
+  'inter-400': ['@fontsource/inter', 'inter-latin-400-normal.woff2'],
+  'inter-500': ['@fontsource/inter', 'inter-latin-500-normal.woff2'],
+  'inter-600': ['@fontsource/inter', 'inter-latin-600-normal.woff2'],
+  'outfit-200': ['@fontsource/outfit', 'outfit-latin-200-normal.woff2'],
+  'outfit-300': ['@fontsource/outfit', 'outfit-latin-300-normal.woff2'],
+  'outfit-400': ['@fontsource/outfit', 'outfit-latin-400-normal.woff2'],
+  'outfit-500': ['@fontsource/outfit', 'outfit-latin-500-normal.woff2'],
+  'jetbrains-400': ['@fontsource/jetbrains-mono', 'jetbrains-mono-latin-400-normal.woff2']
+};
+const pastaFontes = path.join(__dirname, '..', 'renderer', 'fonts');
+fs.mkdirSync(pastaFontes, { recursive: true });
+const fontesOk = [];
+for (const [nome, [pacote, arquivo]] of Object.entries(FONTES)) {
+  try {
+    const f = path.join(path.dirname(require.resolve(pacote + '/package.json')), 'files', arquivo);
+    fs.copyFileSync(f, path.join(pastaFontes, nome + '.woff2'));
+    fontesOk.push(nome);
+  } catch (e) { console.log('Sem fonte ' + nome + ': ' + e.message); }
+}
+console.log('Fontes copiadas: ' + fontesOk.join(', '));
+
 // Tokens que não estão no pacote: logo oficial do repositório público da Trust Wallet
 const TOKENS = {
   shib: 'ethereum/assets/0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE',

@@ -33,9 +33,16 @@ jobs:
           CARTEIRA_TESTE: '1'
         run: |
           sudo apt-get install -y xvfb >/dev/null 2>&1 || true
-          timeout 180 xvfb-run -a npx electron . --no-sandbox > saida.txt 2>&1 || true
+          timeout 300 xvfb-run -a -s "-screen 0 1600x1000x24" npx electron . --no-sandbox > saida.txt 2>&1 || true
           grep '^LOG' saida.txt | cut -c30-330 > logs.txt || true
           grep -iE 'error' saida.txt | grep -v '^LOG' | head -5 >> logs.txt || true
           split -l 25 logs.txt parte_
           for f in parte_*; do echo "::warning::$(sed ':a;N;$!ba;s/\n/%0A/g' "$f")"; done
           grep -q 'tela visível: tela-' saida.txt
+      - name: Guardar fotos das telas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telas
+          path: telas/
+          if-no-files-found: ignore

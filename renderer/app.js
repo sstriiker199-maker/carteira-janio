@@ -164,10 +164,20 @@ async function carregarCarteiras() {
   await mostrarTanque();
   $('lista-carteiras').innerHTML = carteiras.filter((c) => c.index !== tanqueIndex).map((c) => `
     <li data-i="${c.index}" class="${c.index === atual ? 'ativa' : ''}">
-      <div class="li-topo"><span>${esc(c.name)}</span><span class="li-total" data-total="${c.index}">${esc(dolar(totais[c.index]))}</span></div>
-      <small>${c.importada ? '📥 ' : ''}${esc(c.evmAddress.slice(0, 8))}…${esc(c.evmAddress.slice(-6))}</small>
+      <span class="av" aria-hidden="true">${esc(iniciais(c.name))}</span>
+      <div class="li-corpo">
+        <div class="li-topo"><span>${esc(c.name)}</span><span class="li-total" data-total="${c.index}">${esc(dolar(totais[c.index]))}</span></div>
+        <small>${c.importada ? '📥 ' : ''}${esc(c.evmAddress.slice(0, 6))}…${esc(c.evmAddress.slice(-4))}</small>
+      </div>
     </li>`).join('');
   for (const li of $('lista-carteiras').querySelectorAll('li')) li.onclick = () => selecionar(Number(li.dataset.i));
+}
+
+// iniciais para o círculo da lista (ex.: "Jean Schmit" → "JS")
+function iniciais(nome) {
+  const p = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (!p.length) return '?';
+  return ((p[0][0] || '') + (p.length > 1 ? p[p.length - 1][0] : (p[0][1] || ''))).toUpperCase();
 }
 
 function carteiraAtual() {
@@ -180,6 +190,7 @@ function selecionar(index) {
   $('tanque').classList.toggle('ativa', index === tanqueIndex);
   const c = carteiraAtual();
   $('nome-carteira').textContent = c.name;
+  $('cc-nome').textContent = c.name;
   $('end-evm').textContent = c.evmAddress;
   $('end-tron').textContent = c.tronAddress;
   saldos = {};
@@ -336,7 +347,13 @@ function atualizarCelulas() {
 
 function mostrarTotais() {
   for (const el of document.querySelectorAll('[data-total]')) el.textContent = dolar(totais[el.dataset.total]);
-  $('total-carteira').textContent = totais[atual] != null ? dolar(totais[atual]) : '';
+  // saldo grande: "US$ <b>1.234</b><i>,56</i>"
+  const el = $('total-carteira');
+  if (totais[atual] == null) { el.textContent = 'US$ —'; return; }
+  const t = dolar(totais[atual]);
+  const m = /^(.*?)([\d.]+)(,\d+)?$/.exec(t);
+  if (m) el.innerHTML = `${esc(m[1])}<b>${esc(m[2])}</b><i>${esc(m[3] || '')}</i>`;
+  else el.textContent = t;
 }
 
 let tanqueTimer = null;

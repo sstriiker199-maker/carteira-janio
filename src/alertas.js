@@ -22,7 +22,7 @@ async function enviarEmail(email, assunto, texto) {
   const t = nodemailer.createTransport({ service: 'gmail', auth: { user: usuario, pass: senha } });
   try {
     await t.sendMail({
-      from: `Wallet - Trabalho <${usuario}>`,
+      from: `Wallet Pessoal <${usuario}>`,
       to: String(email.destino || '').trim() || usuario,
       subject: assunto,
       text: texto
@@ -44,7 +44,7 @@ function avisar({ cfg, tipo, titulo, corpo, aoClicar, log }) {
   }
   if (cfg.email.ativo && cfg.email[tipo]) {
     const email = { ...cfg.email, senha: decifrar(cfg.email.senhaCifrada) };
-    enviarEmail(email, `[Wallet - Trabalho] ${titulo}`, `${titulo}\n${corpo}\n\n${new Date().toLocaleString('pt-BR')}`)
+    enviarEmail(email, `[Wallet Pessoal] ${titulo}`, `${titulo}\n${corpo}\n\n${new Date().toLocaleString('pt-BR')}`)
       .catch((e) => log && log('[email] ' + e.message));
   }
 }
