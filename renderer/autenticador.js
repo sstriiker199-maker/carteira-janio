@@ -15,7 +15,7 @@ function autParar() {
 const _fecharModalOriginal = fecharModal;
 fecharModal = function () { autParar(); _fecharModalOriginal(); };
 
-const fmtCodigo = (c) => (c.length === 6 ? c.slice(0, 3) + ' ' + c.slice(3) : c.length === 8 ? c.slice(0, 4) + ' ' + c.slice(4) : c);
+const fmtCodigo = (c) => (c.length === 6 ? c.slice(0, 3) + ' ' + c.slice(3) : c.length === 7 ? c.slice(0, 3) + ' ' + c.slice(3) : c.length === 8 ? c.slice(0, 4) + ' ' + c.slice(4) : c);
 
 async function abrirAutenticador() {
   autParar();
@@ -86,9 +86,10 @@ async function autDesenhar(refazer) {
       <div class="aut-card${autSelecionando ? ' selecionando' : ''}${autSel.has(c.id) ? ' marcada' : ''}" data-id="${esc(c.id)}">
         ${autSelecionando ? `<input type="checkbox" class="aut-check" aria-label="Selecionar ${esc(c.emissor || c.nome)}" ${autSel.has(c.id) ? 'checked' : ''}>` : ''}
         <div class="aut-cab"><div class="aut-nomes"><span class="aut-emissor">${esc(c.emissor || 'Conta')}</span><span class="aut-nome">${esc(c.nome)}</span></div>
-          <div class="aut-menu"><button class="mini" data-aut="ren">Renomear</button><button class="mini" data-aut="qr">QR</button><button class="mini perigo-borda" data-aut="del">Remover</button></div></div>
+          <div class="aut-menu"><button class="mini" data-aut="ren">Editar</button><button class="mini" data-aut="qr">QR</button><button class="mini perigo-borda" data-aut="del">Remover</button></div></div>
         <button class="aut-codigo" data-aut="copiar" title="Clique para copiar"><span data-cod></span></button>
         <div class="aut-rodape"><div class="aut-barra"><div data-barra></div></div><span class="aut-resta" data-resta></span><span class="aut-prox cinza" data-prox></span></div>
+        <div class="aut-cfg cinza">${c.digitos} dígitos · troca a cada ${c.periodo} s</div>
       </div>`).join('') || '<p class="cinza">Nenhuma conta com esse nome.</p>';
     for (const card of box.querySelectorAll('.aut-card')) {
       const id = card.dataset.id;
@@ -126,14 +127,21 @@ async function autAcao(acao, id, card) {
   if (acao === 'ren') {
     autParar();
     abrirModal(`
-      <h2>Renomear conta</h2>
+      <h2>Editar conta</h2>
       <label>Site / serviço</label><input id="a-emissor" value="${esc(c.emissor)}">
       <label>Nome da conta</label><input id="a-nome" value="${esc(c.nome)}">
+      <div class="secao"><h3>Ajuste do código</h3>
+        <p class="ajuda">Mude só se o site recusar os códigos. A Twitch costuma usar <b>7 dígitos a cada 10 s</b>; quase todos os outros sites usam <b>6 dígitos a cada 30 s</b>. Compare com o que o site pede e teste.</p>
+        <div class="grade2">
+          <div><label>Dígitos</label><select id="a-dig">${[6, 7, 8].map((d) => `<option value="${d}" ${c.digitos === d ? 'selected' : ''}>${d} dígitos</option>`).join('')}</select></div>
+          <div><label>Troca a cada</label><select id="a-per">${[10, 15, 30, 60].map((p) => `<option value="${p}" ${c.periodo === p ? 'selected' : ''}>${p} segundos</option>`).join('')}</select></div>
+        </div>
+      </div>
       <p id="a-erro" class="erro"></p>
       <div class="linha"><button id="a-voltar">Voltar</button><button id="a-ok" class="primario">Salvar</button></div>`);
     $('a-voltar').onclick = abrirAutenticador;
     $('a-ok').onclick = async () => {
-      try { await rpc('autEditar', { id, nome: $('a-nome').value, emissor: $('a-emissor').value }); abrirAutenticador(); } catch (e) { $('a-erro').textContent = e.message; }
+      try { await rpc('autEditar', { id, nome: $('a-nome').value, emissor: $('a-emissor').value, digitos: Number($('a-dig').value), periodo: Number($('a-per').value) }); abrirAutenticador(); } catch (e) { $('a-erro').textContent = e.message; }
     };
     return;
   }

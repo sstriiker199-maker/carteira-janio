@@ -1569,7 +1569,7 @@ const conferirSenha = (password) => { vault.decrypt(readJson(dataFile()).vault, 
 
 handle('autLista', () => {
   const agora = Date.now();
-  return autContas().map((c) => ({ id: c.id, nome: c.nome, emissor: c.emissor, digitos: c.digitos, ...totp.codigo(c, agora) }));
+  return autContas().map((c) => ({ id: c.id, nome: c.nome, emissor: c.emissor, digitos: c.digitos || 6, ...totp.codigo(c, agora) }));
 });
 handle('autAdicionar', ({ segredo, nome, emissor, digitos, algo, periodo }) => {
   const c = totp.normalizar({ segredo, nome, emissor, digitos, algo, periodo });
@@ -1595,11 +1595,13 @@ handle('autImportar', ({ textos }) => {
   if (!contas.length && erros.length) throw new Error(erros[0]);
   return { ...autAdicionarLista(contas), lidas: contas.length, pulados, lotes, erros };
 });
-handle('autEditar', ({ id, nome, emissor }) => {
+handle('autEditar', ({ id, nome, emissor, digitos, periodo }) => {
   const c = autContas().find((x) => x.id === id);
   if (!c) throw new Error('Conta não encontrada.');
   c.nome = String(nome || '').trim().slice(0, 120) || c.nome;
   c.emissor = String(emissor || '').trim().slice(0, 80);
+  if ([6, 7, 8].includes(Number(digitos))) c.digitos = Number(digitos);
+  if ([10, 15, 30, 60].includes(Number(periodo))) c.periodo = Number(periodo);
   autSalvar();
   return true;
 });
