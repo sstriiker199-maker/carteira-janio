@@ -809,7 +809,7 @@ handle('contatos', ({ rede }) => {
   const l = readJson(contatosFile()) || [];
   return rede ? l.filter((c) => c.rede === rede) : l;
 });
-handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira }) => {
+handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira, novo }) => {
   nome = String(nome || '').trim();
   endereco = String(endereco || '').trim();
   if (!nome) throw new Error('Dê um nome para o favorito.');
@@ -818,9 +818,15 @@ handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira }) => {
   if (!enderecoValidoPara(NETWORKS[rede], endereco)) throw new Error(`Esse endereço não é da rede ${NETWORKS[rede].rotulo}. Confira antes de salvar.`);
   const vinc = carteira === '' || carteira == null ? undefined : Number(carteira);
   const l = readJson(contatosFile()) || [];
-  const existente = id ? l.find((c) => c.id === id) : l.find((c) => c.rede === rede && c.endereco === endereco && (c.memo || '') === (memo || ''));
+  let existente;
+  if (id) existente = l.find((c) => c.id === id);
+  else if (novo) {
+    // favorito criado pelo formulário: sempre novo (só recusa se for idêntico a um que já existe)
+    const igual = l.find((c) => c.rede === rede && c.endereco === endereco && (c.memo || '') === (memo || '') && (c.carteira == null ? null : c.carteira) === (vinc == null ? null : vinc));
+    if (igual) throw new Error(`Já existe um favorito igual: "${igual.nome}".`);
+  } else existente = l.find((c) => c.rede === rede && c.endereco === endereco && (c.memo || '') === (memo || ''));
   if (existente) Object.assign(existente, { nome, endereco, memo: memo || undefined, carteira: carteira === undefined ? existente.carteira : vinc });
-  else l.push({ id: 'c' + Date.now(), nome, rede, rotuloRede: NETWORKS[rede].rotulo, endereco, memo: memo || undefined, carteira: vinc });
+  else l.push({ id: 'c' + Date.now() + Math.random().toString(36).slice(2, 5), nome, rede, rotuloRede: NETWORKS[rede].rotulo, endereco, memo: memo || undefined, carteira: vinc });
   writeJson(contatosFile(), l);
   return true;
 });
@@ -1343,6 +1349,7 @@ app.whenReady().then(() => {
           await t('estimar bonk', async () => c('estimate', { index: 0, assetId: 'bonk', to: await dest2('sol'), amount: '1' }));
           await t('assinar utxo', () => c('testeAssinar'));
           await t('favorito vinculado', async () => { await c('salvarContato', { nome: 'Corretora XRP', rede: 'xrp', endereco: 'rHsMGQEkVNJmpGWs8XUBoTBiAAbwxZN5v3', memo: '555', carteira: 0 }); return (await c('contatos', { rede: 'xrp' })).map(x => x.nome + ' tag ' + x.memo + ' carteira ' + x.carteira); });
+          await t('dois favoritos mesmo endereco', async () => { await c('salvarContato', { novo: true, nome: 'Dest A', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 0 }); await c('salvarContato', { novo: true, nome: 'Dest B', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 1 }); return (await c('contatos', { rede: 'solana' })).map(x => x.nome); });
           await t('favorito rede errada', () => c('salvarContato', { nome: 'X', rede: 'solana', endereco: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }));
           await t('tela favoritos nova', async () => { await document.getElementById('btn-contatos').onclick(); const ok = !!document.getElementById('nf-rede'); fecharModal(); return ok ? 'formulario ok' : 'sem formulario'; });
           await t('favorito', async () => { await c('salvarContato', { nome: 'Teste Fav', rede: 'tron', endereco: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t' }); return (await c('contatos', { rede: 'tron' })).map(x => x.nome); });

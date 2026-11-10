@@ -815,7 +815,7 @@ $('btn-contatos').onclick = async () => {
   ajustarMemo();
   $('nf-salvar').onclick = async () => {
     try {
-      await rpc('salvarContato', { nome: $('nf-nome').value, rede: $('nf-rede').value, endereco: $('nf-end').value.trim(), memo: $('nf-memo').value.trim() || undefined, carteira: $('nf-carteira').value });
+      await rpc('salvarContato', { novo: true, nome: $('nf-nome').value, rede: $('nf-rede').value, endereco: $('nf-end').value.trim(), memo: $('nf-memo').value.trim() || undefined, carteira: $('nf-carteira').value });
       aviso('Favorito salvo');
       $('btn-contatos').onclick();
     } catch (e) { $('nf-res').textContent = e.message; }
