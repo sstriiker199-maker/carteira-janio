@@ -1,7 +1,7 @@
 {
   "name": "carteira-janio",
   "productName": "Wallet - Trabalho",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Carteira de criptomoedas com várias carteiras (Etapa 1: Ethereum, BNB Chain, Polygon, Avalanche, Tron)",
   "author": "Janio",
   "license": "UNLICENSED",
