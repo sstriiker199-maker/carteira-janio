@@ -809,7 +809,7 @@ handle('contatos', ({ rede }) => {
   const l = readJson(contatosFile()) || [];
   return rede ? l.filter((c) => c.rede === rede) : l;
 });
-handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira, novo }) => {
+handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira, novo, express }) => {
   nome = String(nome || '').trim();
   endereco = String(endereco || '').trim();
   if (!nome) throw new Error('Dê um nome para o favorito.');
@@ -825,7 +825,7 @@ handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira, novo }) => 
     const igual = l.find((c) => c.rede === rede && c.endereco === endereco && (c.memo || '') === (memo || '') && (c.carteira == null ? null : c.carteira) === (vinc == null ? null : vinc));
     if (igual) throw new Error(`Já existe um favorito igual: "${igual.nome}".`);
   } else existente = l.find((c) => c.rede === rede && c.endereco === endereco && (c.memo || '') === (memo || ''));
-  if (existente) Object.assign(existente, { nome, endereco, memo: memo || undefined, carteira: carteira === undefined ? existente.carteira : vinc });
+  if (existente) Object.assign(existente, { nome, endereco, memo: memo || undefined, carteira: carteira === undefined ? existente.carteira : vinc, express: express || existente.express });
   else l.push({ id: 'c' + Date.now() + Math.random().toString(36).slice(2, 5), nome, rede, rotuloRede: NETWORKS[rede].rotulo, endereco, memo: memo || undefined, carteira: vinc });
   writeJson(contatosFile(), l);
   return true;
@@ -839,6 +839,13 @@ handle('salvarMoedasFavoritas', ({ ids }) => {
   atual.moedasFavoritas = (ids || []).filter((id) => ASSETS.some((a) => a.id === id));
   writeJson(cfgFile(), atual);
   return atual.moedasFavoritas;
+});
+
+// Cotação na hora (para o Envio Express em US$ / €)
+handle('cotacao', async ({ assetId }) => {
+  await precos.atualizar().catch(() => {});
+  const a = getAsset(assetId).asset;
+  return { usd: precos.preco(a.symbol), eurUsd: precos.euro(), symbol: a.symbol, decimals: a.decimals };
 });
 
 handle('apagarContato', ({ id }) => {
@@ -1376,6 +1383,9 @@ app.whenReady().then(() => {
           await t('bnb max sem saldo', () => c('estimate', { index: 1, assetId: 'bnb', to: '0x000000000000000000000000000000000000dEaD', max: true }));
           await t('reverificar', () => c('reverificarCarteiras', { indices: [0, 1] }));
           await t('atualizar todas', () => c('atualizarTodas'));
+          await t('cotacao sol', () => c('cotacao', { assetId: 'sol' }));
+          await t('tela express', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('.xp-card').length; fecharModal(); return n + ' cartões express'; });
+          await t('tela envio rapido', async () => { document.getElementById('btn-rapido').click(); await new Promise(r => setTimeout(r, 400)); const n = document.querySelectorAll('.er-dest').length; const de = document.getElementById('er-de').selectedOptions[0].textContent; fecharModal(); return n + ' destinos; de ' + de; });
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));

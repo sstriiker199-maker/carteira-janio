@@ -17,6 +17,7 @@ const GECKO = {
 
 const cache = { USDT: { usd: 1, var24h: 0 } }; // símbolo -> { usd, var24h }
 let dolarReal = null; // { brl, var24h }
+let euroDolar = null; // 1 EUR em US$
 let mercado = [];
 let ultBinance = 0;
 let ultGecko = 0;
@@ -29,7 +30,7 @@ async function getJson(url) {
 }
 
 async function daBinance() {
-  const pares = [...Object.values(PARES), 'USDTBRL'];
+  const pares = [...Object.values(PARES), 'USDTBRL', 'EURUSDT'];
   const lista = await getJson(`${BINANCE}?symbols=${encodeURIComponent(JSON.stringify(pares))}`);
   const porPar = Object.fromEntries(lista.map((t) => [t.symbol, t]));
   for (const [sym, par] of Object.entries(PARES)) {
@@ -38,6 +39,8 @@ async function daBinance() {
   }
   const brl = porPar.USDTBRL;
   if (brl) dolarReal = { brl: Number(brl.lastPrice), var24h: Number(brl.priceChangePercent) };
+  const eur = porPar.EURUSDT;
+  if (eur) euroDolar = Number(eur.lastPrice);
 }
 
 async function doGecko(somenteFaltando) {
@@ -87,5 +90,6 @@ function mercadoAoVivo() {
 const preco = (symbol) => (cache[symbol] ? cache[symbol].usd : undefined);
 const variacao = (symbol) => (cache[symbol] ? cache[symbol].var24h : undefined);
 const dolar = () => dolarReal;
+const euro = () => euroDolar;
 
-module.exports = { atualizar, atualizarMercado, mercadoAoVivo, preco, variacao, dolar };
+module.exports = { atualizar, atualizarMercado, mercadoAoVivo, preco, variacao, dolar, euro };

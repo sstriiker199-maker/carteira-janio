@@ -173,3 +173,14 @@ table.moedas .c-hoje { width: 110px; }
 table.moedas .c-rede { width: 250px; padding-left: 24px; }
 table.moedas td:nth-child(5) { padding-left: 24px; }
 table.moedas td.botoes { text-align: left; }
+
+.xp-lista { display: flex; flex-direction: column; gap: 8px; max-height: 45vh; overflow-y: auto; }
+.xp-card { background: #1a2130; border: 1px solid #2b3550; border-radius: 10px; padding: 10px 12px; }
+.xp-linha { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.xp-linha input, .xp-linha select { width: auto; margin: 0; padding: 6px 8px; }
+.xp-linha input.curto { width: 90px; }
+.xp-sep { color: #3a4255; margin: 0 4px; }
+.xp-st { font-size: 13px; margin-top: 6px; min-height: 16px; }
+.xp-st a { color: #8ab4ff; }
+select.curto2 { width: 120px; margin-bottom: 12px; }
+input.curto3 { width: 180px; margin: 0; }

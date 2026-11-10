@@ -756,7 +756,12 @@ $('btn-contatos').onclick = async () => {
   const opCarteiras = (sel) => `<option value="">— nenhuma —</option>${carteiras.map((c) => `<option value="${c.index}" ${sel === c.index ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}`;
   abrirModal(`
     <h2>⭐ Favoritos</h2>
-    <div class="secao novo-fav">
+    ${lista.length ? `<div class="secao novo-fav">
+      <h3>⚡ Envio Express</h3>
+      <p class="ajuda">Abaixo de US$ ${LIMITE_1_CLIQUE}: envia com 1 clique. A partir de US$ ${LIMITE_1_CLIQUE}: o 1º clique mostra o valor e o 2º confirma. Valores em US$/€ usam a cotação do momento.</p>
+      <div class="xp-lista">${lista.map((f, i) => cartaoExpress(f, i)).join('')}</div>
+    </div>` : ''}
+    <div class="secao">
       <h3>+ Novo favorito</h3>
       <div class="grade2">
         <div><label>Nome</label><input id="nf-nome" placeholder="ex.: Binance do João"></div>
@@ -789,6 +794,7 @@ $('btn-contatos').onclick = async () => {
     <div class="linha"><button id="m-fechar" class="primario">Fechar</button></div>`);
   $('modal').classList.add('largo');
   $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  ligarExpress(lista);
 
   for (const cb of document.querySelectorAll('.fm')) {
     cb.onchange = async () => {
@@ -834,6 +840,194 @@ $('btn-contatos').onclick = async () => {
     b.onclick = async () => { await rpc('apagarContato', { id: lista[Number(b.dataset.fapagar)].id }); $('btn-contatos').onclick(); };
   }
 };
+
+// ---------- ⚡ Envio rápido: uma carteira → várias carteiras minhas ----------
+$('btn-rapido').onclick = () => {
+  const de0 = tanqueIndex != null ? tanqueIndex : atual;
+  abrirModal(`
+    <h2>⚡ Envio rápido</h2>
+    <p class="sub">Manda o mesmo valor de uma carteira para várias carteiras suas.</p>
+    <div class="grade2">
+      <div><label>De (carteira que paga)</label><select id="er-de">${carteiras.map((c) => `<option value="${c.index}" ${c.index === de0 ? 'selected' : ''}>${c.index === tanqueIndex ? '⛽ ' : ''}${esc(c.name)}</option>`).join('')}</select></div>
+      <div><label>Moeda</label><select id="er-moeda">${opcoesMoedas(moedas, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)}`)}</select></div>
+    </div>
+    <label>Valor para CADA carteira</label>
+    <div class="campo-valor"><input id="er-valor" placeholder="ex.: 1" inputmode="decimal"><select id="er-unid" class="curto2"><option value="usd">US$</option><option value="moeda">na moeda</option></select></div>
+    <label>Para quais carteiras</label>
+    <div class="linha filtros"><button id="er-todas" class="mini">Marcar todas</button><button id="er-nenhuma" class="mini">Desmarcar</button><input id="er-filtro" placeholder="filtrar por nome" class="curto3"></div>
+    <div class="chips" id="er-lista">${carteiras.map((c) => `<label class="chip er-chip" data-nome="${esc(c.name.toLowerCase())}"><input type="checkbox" class="er-dest" value="${c.index}"> ${esc(c.name)}</label>`).join('')}</div>
+    <div id="er-res"></div>
+    <p id="m-erro" class="erro"></p>
+    <div class="linha" id="er-botoes"><button id="m-fechar">Fechar</button><button id="er-revisar" class="primario">Revisar</button></div>`);
+  $('modal').classList.add('largo');
+  $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
+  const ajustarOrigem = () => { for (const cb of document.querySelectorAll('.er-dest')) { const e = Number(cb.value) === Number($('er-de').value); cb.disabled = e; if (e) cb.checked = false; } };
+  $('er-de').onchange = ajustarOrigem;
+  ajustarOrigem();
+  $('er-todas').onclick = () => { for (const cb of document.querySelectorAll('.er-dest')) if (!cb.disabled && !cb.closest('.er-chip').classList.contains('hidden')) cb.checked = true; };
+  $('er-nenhuma').onclick = () => { for (const cb of document.querySelectorAll('.er-dest')) cb.checked = false; };
+  $('er-filtro').oninput = () => { const q = $('er-filtro').value.toLowerCase(); for (const ch of document.querySelectorAll('.er-chip')) ch.classList.toggle('hidden', !!q && !ch.dataset.nome.includes(q)); };
+  let plano = [];
+  $('er-revisar').onclick = async () => {
+    $('m-erro').textContent = '';
+    const assetId = $('er-moeda').value;
+    const de = Number($('er-de').value);
+    const destinos = [...document.querySelectorAll('.er-dest:checked')].map((x) => Number(x.value));
+    if (!destinos.length) { $('m-erro').textContent = 'Marque pelo menos uma carteira.'; return; }
+    const v = parseFloat(String($('er-valor').value).replace(',', '.'));
+    if (!(v > 0)) { $('m-erro').textContent = 'Digite o valor.'; return; }
+    let quantidade = v;
+    if ($('er-unid').value === 'usd') {
+      const q = await rpc('cotacao', { assetId });
+      if (!q.usd) { $('m-erro').textContent = 'Sem cotação dessa moeda agora.'; return; }
+      quantidade = v / q.usd;
+    }
+    const m = moedas.find((x) => x.id === assetId);
+    const casas = Math.min(8, m.decimals || 8);
+    const qtdTxt = (Math.floor(quantidade * 10 ** casas) / 10 ** casas).toFixed(casas).replace(/\.?0+$/, '');
+    plano = [];
+    $('er-res').innerHTML = `<table><thead><tr><th>Para</th><th class="dir">Valor</th><th>Situação</th></tr></thead><tbody>${destinos.map((i) => `<tr data-er="${i}"><td>${esc(carteiras.find((c) => c.index === i).name)}</td><td class="dir">${esc(qtdTxt)} ${esc(m.symbol)}</td><td class="er-st cinza">calculando…</td></tr>`).join('')}</tbody></table>`;
+    let total = 0;
+    let taxas = 0;
+    for (const i of destinos) {
+      const st = document.querySelector(`[data-er="${i}"] .er-st`);
+      try {
+        const para = (await rpc('receive', { index: i, assetId })).address;
+        const r = await rpc('estimate', { index: de, assetId, to: para, amount: qtdTxt });
+        st.textContent = `ok · taxa ≈ ${dolar(r.feeUsd || 0)}`;
+        plano.push({ i, para });
+        total += r.amountUsd || 0;
+        taxas += (r.feeUsd || 0) + (r.abastecer ? (r.abastecer.usd || 0) : 0);
+      } catch (e) { st.textContent = e.message; st.classList.add('erro'); }
+    }
+    $('m-erro').innerHTML = plano.length ? `<span class="ok">${plano.length} envio(s) de ${esc(qtdTxt)} ${esc(m.symbol)} · total ≈ ${esc(dolar(total))} · taxas ≈ ${esc(dolar(taxas))}</span>` : 'Nenhum envio possível.';
+    const velho = $('er-enviar');
+    if (velho) velho.remove();
+    if (!plano.length) return;
+    const b = document.createElement('button');
+    b.id = 'er-enviar';
+    b.className = 'perigo';
+    b.textContent = `Enviar para ${plano.length} carteira(s)`;
+    $('er-botoes').appendChild(b);
+    b.onclick = async () => {
+      b.disabled = true;
+      $('er-revisar').disabled = true;
+      for (const p of plano) {
+        const st = document.querySelector(`[data-er="${p.i}"] .er-st`);
+        st.textContent = 'enviando…';
+        try { await rpc('send', { index: de, assetId, to: p.para, amount: qtdTxt }); st.textContent = '✅ enviado'; st.classList.remove('cinza'); }
+        catch (e) { st.textContent = '❌ ' + e.message; st.classList.add('erro'); }
+      }
+      $('m-erro').innerHTML = '<span class="ok">Concluído. Veja na aba Atividade.</span>';
+    };
+  };
+};
+
+// ---------- ⚡ Envio Express (favoritos) ----------
+const LIMITE_1_CLIQUE = 50; // US$
+function nativoDaRede(rede) { return moedas.find((m) => m.network === rede && m.native) || moedas.find((m) => m.network === rede); }
+
+function cartaoExpress(f, i) {
+  const x = f.express || {};
+  const moedasRede = moedas.filter((m) => m.network === f.rede);
+  const assetId = x.assetId && moedasRede.some((m) => m.id === x.assetId) ? x.assetId : nativoDaRede(f.rede).id;
+  const m = moedas.find((y) => y.id === assetId);
+  const teste = x.teste || (m.symbol === 'SOL' ? '0.01' : '');
+  const de = f.carteira != null ? carteiras.find((c) => c.index === f.carteira) : null;
+  return `<div class="xp-card" data-xp="${i}">
+    <div class="li-topo"><b>⚡ ${esc(f.nome)}</b><span class="cinza">${esc(f.rotuloRede || f.rede)} · de <b>${de ? esc(de.name) : 'carteira aberta'}</b></span></div>
+    <div class="xp-linha">
+      <select class="xp-moeda">${moedasRede.map((y) => `<option value="${y.id}" ${y.id === assetId ? 'selected' : ''}>${esc(y.symbol)}</option>`).join('')}</select>
+      <span class="cinza">Teste:</span><input class="xp-teste curto" value="${esc(teste)}" placeholder="${m.symbol === 'SOL' ? '0.01' : 'valor'}">
+      <button class="xp-btn-teste">Enviar teste</button>
+      <span class="xp-sep">|</span>
+      <input class="xp-alto curto" value="${esc(x.alto || '1000')}">
+      <select class="xp-unid"><option value="usd" ${x.unid !== 'eur' && x.unid !== 'moeda' ? 'selected' : ''}>US$</option><option value="eur" ${x.unid === 'eur' ? 'selected' : ''}>€</option><option value="moeda" ${x.unid === 'moeda' ? 'selected' : ''}>${esc(m.symbol)}</option></select>
+      <button class="xp-btn-alto primario">Enviar valor</button>
+    </div>
+    <div class="xp-st cinza"></div>
+  </div>`;
+}
+
+async function ligarExpress(lista) {
+  for (const card of document.querySelectorAll('.xp-card')) {
+    const f = lista[Number(card.dataset.xp)];
+    const st = card.querySelector('.xp-st');
+    let armado = null; // { botao, dados } aguardando 2º clique
+    const salvarCfg = () => rpc('salvarContato', { ...f, express: {
+      assetId: card.querySelector('.xp-moeda').value, teste: card.querySelector('.xp-teste').value,
+      alto: card.querySelector('.xp-alto').value, unid: card.querySelector('.xp-unid').value
+    } }).catch(() => {});
+    for (const el of card.querySelectorAll('select, input')) el.addEventListener('change', () => { armado = null; reset(); salvarCfg(); });
+    const reset = () => {
+      card.querySelector('.xp-btn-teste').textContent = 'Enviar teste';
+      card.querySelector('.xp-btn-teste').classList.remove('perigo');
+      card.querySelector('.xp-btn-alto').textContent = 'Enviar valor';
+      card.querySelector('.xp-btn-alto').classList.remove('perigo');
+      card.querySelector('.xp-btn-alto').classList.add('primario');
+    };
+    const origem = () => (f.carteira != null ? f.carteira : atual);
+
+    async function calcular(tipo) {
+      const assetId = card.querySelector('.xp-moeda').value;
+      const m = moedas.find((y) => y.id === assetId);
+      const q = await rpc('cotacao', { assetId });
+      const casas = Math.min(8, m.decimals || 8);
+      let qtd;
+      let explic = '';
+      if (tipo === 'teste') {
+        qtd = parseFloat(String(card.querySelector('.xp-teste').value).replace(',', '.'));
+      } else {
+        const v = parseFloat(String(card.querySelector('.xp-alto').value).replace(',', '.'));
+        const u = card.querySelector('.xp-unid').value;
+        if (u === 'moeda') qtd = v;
+        else if (!q.usd) throw new Error('Sem cotação dessa moeda agora.');
+        else if (u === 'usd') { qtd = v / q.usd; explic = ` (US$ ${v} ÷ cotação ${precoFmt(q.usd)})`; }
+        else { if (!q.eurUsd) throw new Error('Sem cotação do euro agora.'); qtd = (v * q.eurUsd) / q.usd; explic = ` (€ ${v} = ${dolar(v * q.eurUsd)} ÷ ${precoFmt(q.usd)})`; }
+      }
+      if (!(qtd > 0)) throw new Error('Digite o valor.');
+      const qtdTxt = (Math.floor(qtd * 10 ** casas) / 10 ** casas).toFixed(casas).replace(/\.?0+$/, '');
+      const usd = q.usd ? Number(qtdTxt) * q.usd : null;
+      return { assetId, m, qtdTxt, usd, explic };
+    }
+
+    async function enviarAgora(d, botao) {
+      botao.disabled = true;
+      st.className = 'xp-st';
+      st.textContent = `Enviando ${d.qtdTxt} ${d.m.symbol}…`;
+      try {
+        const r = await rpc('send', { index: origem(), assetId: d.assetId, to: f.endereco, amount: d.qtdTxt, memo: f.memo || undefined });
+        st.innerHTML = `<span class="ok">✅ Enviado ${esc(r.amount)} ${esc(r.symbol)}${r.amountUsd != null ? ' (≈ ' + esc(dolar(r.amountUsd)) + ')' : ''}</span> · taxa ${esc(r.fee)} ${esc(r.feeSymbol)} · <a href="#" class="xp-ver">ver transação</a>`;
+        card.querySelector('.xp-ver').onclick = (e) => { e.preventDefault(); rpc('openExternal', { url: r.explorer }); };
+      } catch (e) { st.className = 'xp-st erro'; st.textContent = '❌ ' + e.message; }
+      botao.disabled = false;
+      armado = null;
+      reset();
+    }
+
+    for (const [sel, tipo] of [['.xp-btn-teste', 'teste'], ['.xp-btn-alto', 'alto']]) {
+      const botao = card.querySelector(sel);
+      botao.onclick = async () => {
+        // 2º clique: confirma
+        if (armado && armado.botao === botao) return enviarAgora(armado.dados, botao);
+        armado = null;
+        reset();
+        st.className = 'xp-st cinza';
+        st.textContent = 'Calculando…';
+        let d;
+        try { d = await calcular(tipo); } catch (e) { st.className = 'xp-st erro'; st.textContent = e.message; return; }
+        if (d.usd != null && d.usd < LIMITE_1_CLIQUE) return enviarAgora(d, botao); // abaixo de US$ 50: 1 clique
+        armado = { botao, dados: d };
+        botao.classList.remove('primario');
+        botao.classList.add('perigo');
+        botao.textContent = `Confirmar: ${d.qtdTxt} ${d.m.symbol}`;
+        st.className = 'xp-st';
+        st.innerHTML = `<b>${esc(d.qtdTxt)} ${esc(d.m.symbol)}</b>${d.usd != null ? ' ≈ <b>' + esc(dolar(d.usd)) + '</b>' : ''}${esc(d.explic)} → ${esc(f.nome)}. Clique de novo em <b>Confirmar</b> para enviar (expira em 15 s).`;
+        setTimeout(() => { if (armado && armado.dados === d) { armado = null; reset(); st.textContent = 'Confirmação expirada.'; } }, 15000);
+      };
+    }
+  }
+}
 
 // favorito vinculado a esta carteira nesta rede (para já vir preenchido)
 async function favoritoVinculado(assetId, index) {
