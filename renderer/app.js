@@ -960,12 +960,15 @@ function cartaoExpress(f, i) {
       <select class="xp-unid"><option value="usd" ${x.unid !== 'eur' && x.unid !== 'moeda' ? 'selected' : ''}>US$</option><option value="eur" ${x.unid === 'eur' ? 'selected' : ''}>€</option><option value="moeda" ${x.unid === 'moeda' ? 'selected' : ''}>${esc(m.symbol)}</option></select>
       <button class="xp-btn-alto primario">Enviar valor</button>
     </div>
+    <div class="xp-saldo cinza">Saldo: …</div>
     <div class="xp-st cinza"></div>
   </div>`;
 }
 
 async function ligarExpress(lista) {
+  let ordem = 0;
   for (const card of document.querySelectorAll('.xp-card')) {
+    setTimeout(() => card._saldoAgora && card._saldoAgora(), 200 + 250 * ordem++);
     const f = lista[Number(card.dataset.xp)];
     const st = card.querySelector('.xp-st');
     let armado = null; // { botao, dados } aguardando 2º clique
@@ -982,6 +985,20 @@ async function ligarExpress(lista) {
       card.querySelector('.xp-btn-alto').classList.add('primario');
     };
     const origem = () => (f.carteira != null ? f.carteira : atual);
+    const elSaldo = card.querySelector('.xp-saldo');
+    // saldo lido direto da rede (não do cache)
+    async function saldoAgora() {
+      const assetId = card.querySelector('.xp-moeda').value;
+      const m = moedas.find((y) => y.id === assetId);
+      try {
+        const b = await rpc('balance', { index: origem(), assetId });
+        const n = String(b.balance).startsWith('<') ? 1e-12 : Number(b.balance);
+        elSaldo.textContent = `Saldo agora: ${b.balance} ${m.symbol}`;
+        return n;
+      } catch (e) { elSaldo.textContent = 'Saldo: não consegui ler agora (' + e.message + ')'; return null; }
+    }
+    card._saldoAgora = saldoAgora;
+    card.querySelector('.xp-moeda').addEventListener('change', saldoAgora);
 
     async function calcular(tipo) {
       const assetId = card.querySelector('.xp-moeda').value;
@@ -1001,9 +1018,19 @@ async function ligarExpress(lista) {
         else { if (!q.eurUsd) throw new Error('Sem cotação do euro agora.'); qtd = (v * q.eurUsd) / q.usd; explic = ` (€ ${v} = ${dolar(v * q.eurUsd)} ÷ ${precoFmt(q.usd)})`; }
       }
       if (!(qtd > 0)) throw new Error('Digite o valor.');
+      const saldo = await saldoAgora();
+      const nomeOrigem = (carteiras.find((c) => c.index === origem()) || {}).name || 'origem';
+      let max = false;
+      if (saldo != null) {
+        if (saldo <= 0) throw new Error(`A carteira ${nomeOrigem} está com 0 ${m.symbol} na rede agora. Se você acabou de depositar, espere a transação confirmar (saque de corretora pode levar alguns minutos) e clique de novo.`);
+        if (qtd >= saldo) {
+          if (tipo === 'teste' && m.native) { max = true; qtd = saldo; explic = ' (ajustado: o saldo todo menos a taxa)'; }
+          else throw new Error(`Você quer enviar ${qtd} ${m.symbol}, mas a carteira ${nomeOrigem} tem ${saldo} ${m.symbol}${m.native ? ' (e ainda precisa sobrar para a taxa)' : ''}.`);
+        }
+      }
       const qtdTxt = (Math.floor(qtd * 10 ** casas) / 10 ** casas).toFixed(casas).replace(/\.?0+$/, '');
       const usd = q.usd ? Number(qtdTxt) * q.usd : null;
-      return { assetId, m, qtdTxt, usd, explic };
+      return { assetId, m, qtdTxt, usd, explic, max, tipo };
     }
 
     async function enviarAgora(d, botao) {
@@ -1011,10 +1038,19 @@ async function ligarExpress(lista) {
       st.className = 'xp-st';
       st.textContent = `Enviando ${d.qtdTxt} ${d.m.symbol}…`;
       try {
-        const r = await rpc('send', { index: origem(), assetId: d.assetId, to: f.endereco, amount: d.qtdTxt, memo: f.memo || undefined });
+        const pedido = { index: origem(), assetId: d.assetId, to: f.endereco, amount: d.qtdTxt, max: d.max || undefined, memo: f.memo || undefined };
+        let r;
+        try { r = await rpc('send', pedido); } catch (e) {
+          // teste em moeda nativa sem sobra para a taxa: manda o saldo todo menos a taxa
+          if (d.tipo === 'teste' && d.m.native && !d.max && /insuficiente|não pode ficar com menos/i.test(e.message)) {
+            st.textContent = 'Sem sobra para a taxa — enviando o saldo todo menos a taxa…';
+            r = await rpc('send', { ...pedido, max: true });
+          } else throw e;
+        }
         st.innerHTML = `<span class="ok">✅ Enviado ${esc(r.amount)} ${esc(r.symbol)}${r.amountUsd != null ? ' (≈ ' + esc(dolar(r.amountUsd)) + ')' : ''}</span> · taxa ${esc(r.fee)} ${esc(r.feeSymbol)} · <a href="#" class="xp-ver">ver transação</a>`;
         card.querySelector('.xp-ver').onclick = (e) => { e.preventDefault(); rpc('openExternal', { url: r.explorer }); };
       } catch (e) { st.className = 'xp-st erro'; st.textContent = '❌ ' + e.message; }
+      setTimeout(saldoAgora, 2500);
       botao.disabled = false;
       armado = null;
       reset();

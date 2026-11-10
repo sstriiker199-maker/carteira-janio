@@ -180,6 +180,7 @@ table.moedas td.botoes { text-align: left; }
 .xp-linha input, .xp-linha select { width: auto; margin: 0; padding: 6px 8px; }
 .xp-linha input.curto { width: 90px; }
 .xp-sep { color: #3a4255; margin: 0 4px; }
+.xp-saldo { font-size: 12px; margin-top: 6px; }
 .xp-st { font-size: 13px; margin-top: 6px; min-height: 16px; }
 .xp-st a { color: #8ab4ff; }
 select.curto2 { width: 120px; margin-bottom: 12px; }

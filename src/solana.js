@@ -59,6 +59,10 @@ async function preparar({ cfg, asset, chave, to, amount, max, velocidade, valorR
     if (value + fee > solBal) throw new Error(`Saldo insuficiente: valor + taxa (${fmt(fee, 9)} SOL) passa do saldo de ${fmt(solBal, 9)} SOL.`);
     const destBal = await c.getBalance(dest);
     const minimo = BigInt(await c.getMinimumBalanceForRentExemption(0));
+    const restante = solBal - value - fee;
+    if (restante > 0n && restante < minimo) {
+      throw new Error(`Na Solana a carteira não pode ficar com menos de ${fmt(minimo, 9)} SOL (regra da rede). Envie tudo (Máx) ou deixe pelo menos isso — dá para enviar até ${fmt(solBal - fee - minimo > 0n ? solBal - fee - minimo : 0n, 9)} SOL.`);
+    }
     if (destBal === 0 && value < minimo) throw new Error(`Para uma carteira Solana nova, envie pelo menos ${fmt(minimo, 9)} SOL (regra da rede).`);
     return {
       value, decimals: 9, fee, feeMax: fee, feeDecimals: 9, to: dest.toBase58(), velocidade: vel,
