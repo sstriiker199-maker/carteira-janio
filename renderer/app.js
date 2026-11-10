@@ -707,7 +707,7 @@ async function carregarMultiplos() {
   const destinos = await opcoesDestino(assetId, null);
   $('mm-botoes').innerHTML = '<button id="m-fechar">Fechar</button>';
   $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
-  if (!lista.length) { $('mm-lista').innerHTML = '<p class="cinza">Nenhuma carteira com esse saldo (os saldos de todas as carteiras são conferidos a cada 1 minuto).</p>'; return; }
+  if (!lista.length) { $('mm-lista').innerHTML = '<p class="cinza">Nenhuma carteira com esse saldo (as outras carteiras são conferidas em rodízio; com muitas carteiras, a volta completa leva alguns minutos).</p>'; return; }
   $('mm-lista').innerHTML = `<table class="multi"><thead><tr><th></th><th>Carteira</th><th class="dir">Saldo</th><th>Destino</th><th>Valor</th><th>Status</th></tr></thead><tbody>
     ${lista.map((w, i) => `<tr data-mm="${i}">
       <td><input type="checkbox" class="mm-sel" checked></td>
@@ -962,7 +962,7 @@ $('btn-importar-carteira').onclick = () => {
     <p class="ajuda" id="i-ajuda">Na MetaMask: clique na conta → Detalhes da conta → Mostrar chave privada.</p>
     <label>Nome</label>
     <input id="i-nome" value="MetaMask">
-    <div id="i-qtd-box" class="hidden"><label>Quantas contas trazer</label><input id="i-qtd" type="number" min="1" max="50" value="1"></div>
+    <div id="i-qtd-box" class="hidden"><label>Quantas contas trazer</label><input id="i-qtd" type="number" min="1" max="200" value="1"></div>
     <p class="alerta">Nunca cole sua chave ou suas palavras em sites ou mensagens. Só aqui dentro do programa.</p>
     <p id="m-erro" class="erro"></p>
     <div class="linha"><button id="m-fechar">Cancelar</button><button id="m-ok" class="primario">Importar</button></div>`);
@@ -1039,7 +1039,7 @@ $('btn-config').onclick = async () => {
     <h3>Atualização dos saldos</h3>
     <label>Atualizar a carteira aberta a cada</label>
     <select id="c-intervalo">${[3, 5, 10, 30, 60].map((n) => `<option value="${n}" ${s.intervalo === n ? 'selected' : ''}>${n} segundos</option>`).join('')}</select>
-    <p class="ajuda">As outras carteiras são conferidas a cada 1 minuto (para avisar quando chegar dinheiro).</p>
+    <p class="ajuda">As outras carteiras são conferidas em rodízio, uma ou duas por vez (com 80 carteiras, a volta completa leva uns 4 minutos).</p>
 
     <div class="secao">
       <h3>Carteira de taxas</h3>

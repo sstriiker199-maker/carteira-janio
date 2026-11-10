@@ -269,7 +269,7 @@ handle('importWallet', ({ tipo, segredo, name, quantidade }) => {
     const frase = segredo.toLowerCase().replace(/\s+/g, ' ');
     if (!Mnemonic.isValidMnemonic(frase)) throw new Error('Frase inválida. Confira as palavras e a ordem.');
     if (frase === session.phrase) throw new Error('Essa é a frase principal deste programa. Use "+ Nova carteira".');
-    const qtd = Math.min(50, Math.max(1, Number(quantidade) || 1));
+    const qtd = Math.min(200, Math.max(1, Number(quantidade) || 1));
     const grupo = 'g' + Date.now();
     session.extras.frases[grupo] = frase;
     const m = Mnemonic.fromPhrase(frase);
@@ -285,6 +285,7 @@ handle('importWallet', ({ tipo, segredo, name, quantidade }) => {
   salvarExtras(data);
   writeJson(dataFile(), data);
   ultimoGeral = 0;
+  rodizio = Math.max(0, data.wallets.length - novas.length - 1);
   cicloMonitor();
   return novas;
 });
@@ -324,6 +325,7 @@ let ultimoGeral = 0;
 let timerMonitor = null;
 let rodando = false;
 let pedirDeNovo = false;
+let rodizio = 0;
 const saldosMem = {}; // índice da carteira -> { assetId: { raw, decimals } }
 
 function valorUsd(assetId, raw, decimals) {
@@ -458,11 +460,17 @@ async function cicloMonitor() {
       if (!ultimos) ultimos = readJson(saldosFile()) || {};
       const data = readJson(dataFile());
       const agora = Date.now();
-      const todas = agora - ultimoGeral > 60000;
-      if (todas) ultimoGeral = agora;
-      const lista = data.wallets
-        .filter((w) => todas || w.index === foco)
-        .sort((a, b) => (a.index === foco ? -1 : b.index === foco ? 1 : 0));
+      // carteira aberta: sempre. As outras: em rodízio, algumas por ciclo (aguenta centenas de carteiras)
+      const outras = data.wallets.filter((w) => w.index !== foco);
+      const lote = [];
+      if (outras.length) {
+        const porCiclo = ultimoGeral === 0 ? Math.min(outras.length, 4) : outras.length <= 20 ? 2 : 1;
+        for (let i = 0; i < porCiclo; i++) lote.push(outras[(rodizio + i) % outras.length]);
+        rodizio = (rodizio + porCiclo) % outras.length;
+      }
+      ultimoGeral = agora;
+      const focada = data.wallets.find((w) => w.index === foco);
+      const lista = [...new Set((focada ? [focada] : []).concat(lote))];
       await precos.atualizar().catch((e) => log('[preços] ' + e.message));
       for (const w of lista) { await verificarCarteira(w); enviarResumo(); }
       fs.writeFileSync(saldosFile(), JSON.stringify(ultimos));
@@ -1062,6 +1070,8 @@ app.whenReady().then(() => {
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
           await t('importar frase', async () => (await c('importWallet', { tipo: 'frase', segredo: 'test test test test test test test test test test test junk', name: 'Outra', quantidade: 2 })).map(w => w.name));
+          await t('importar 82 (completa)', async () => (await c('importWallet', { tipo: 'frase', segredo: 'test test test test test test test test test test test junk', name: 'Outra', quantidade: 82 })).length + ' novas');
+          await t('total carteiras', async () => (await c('wallets')).length);
           await t('lista final', async () => (await c('wallets')).map(w => w.name + ' ' + w.evmAddress.slice(0, 10) + ' ' + w.tronAddress.slice(0, 6) + (w.importada ? ' (imp)' : '')));
           await t('estimar usdt-tron c/ taxa', () => c('estimate', { index: 1, assetId: 'usdt-tron', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount: '1' }));
           await t('estimar bnb velocidades', async () => { try { return await c('estimate', { index: 0, assetId: 'bnb', to: '0x000000000000000000000000000000000000dEaD', amount: '0.001', velocidade: 'rapida' }); } catch (e) { return e.message; } });
