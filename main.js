@@ -845,6 +845,28 @@ handle('atualizarSaldo', async ({ index, assetId }) => {
   return formatarSaldo(assetId, r.raw, r.decimals);
 });
 
+// Reconfere na rede o saldo real das moedas que tinham saldo (rápido, mesmo com centenas de carteiras)
+async function reverificar(indices) {
+  const tarefas = [];
+  for (const i of indices.map(Number)) {
+    const m = saldosMem[i] || {};
+    for (const [assetId, v] of Object.entries(m)) if (v.raw > 0n) tarefas.push([i, assetId]);
+  }
+  await mapLimit(tarefas, 6, async ([i, assetId]) => {
+    try {
+      const r = await comTempo(fetchBalance(i, assetId), 15000);
+      saldosMem[i][assetId] = { raw: r.raw, decimals: r.decimals };
+      if (ultimos) ultimos[`${i}|${assetId}`] = r.raw.toString();
+      ultimaConsulta[`${i}|${assetId}`] = Date.now();
+    } catch { /* mantém o anterior */ }
+  });
+  try { salvarCache(); } catch { /* ok */ }
+  enviarResumo();
+  const r = resumo();
+  return Object.fromEntries(r.filter((x) => indices.map(Number).includes(x.index)).map((x) => [x.index, x.totalUsd || 0]));
+}
+handle('reverificarCarteiras', async ({ indices }) => { requireUnlocked(); return reverificar(indices || []); });
+
 handle('planoJuntar', ({ destino, assetIds, origens, minUsd }) => {
   requireUnlocked();
   const data = readJson(dataFile());
@@ -1095,6 +1117,7 @@ async function runTransfer(mode, { index, assetId, to, amount, max, velocidade, 
   });
   alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Envio em processamento…', corpo: `${texto} · carteira ${w.name}` });
   acompanharEnvio(net, e.hash, texto, w, idAtiv, index);
+  setTimeout(() => reverificar([Number(index)]).catch(() => {}), 20000);
   setTimeout(cicloMonitor, 1500);
   return out;
 }
@@ -1323,6 +1346,7 @@ app.whenReady().then(() => {
           await t('atualizar saldo', () => c('atualizarSaldo', { index: 0, assetId: 'sol' }));
           await t('trx max sem saldo', () => c('estimate', { index: 1, assetId: 'trx', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', max: true }));
           await t('bnb max sem saldo', () => c('estimate', { index: 1, assetId: 'bnb', to: '0x000000000000000000000000000000000000dEaD', max: true }));
+          await t('reverificar', () => c('reverificarCarteiras', { indices: [0, 1] }));
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));

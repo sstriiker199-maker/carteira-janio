@@ -1023,7 +1023,16 @@ $('btn-juntar').onclick = () => {
             st.textContent = '✅ enviado';
           } catch (e) { st.textContent = '❌ ' + e.message; st.classList.add('erro'); }
         }
-        $('m-erro').innerHTML = '<span class="ok">Concluído. Veja os detalhes na aba Atividade.</span>';
+        $('m-erro').innerHTML = '<span class="ok">Concluído. Conferindo os saldos das carteiras em 30 segundos…</span>';
+        setTimeout(async () => {
+          const origens = [...new Set(itens.filter((x) => x._ok).map((x) => x.index))];
+          try {
+            const novos = await rpc('reverificarCarteiras', { indices: origens });
+            for (const [i, v] of Object.entries(novos)) totais[i] = v;
+            mostrarTotais();
+            if ($('m-erro')) $('m-erro').innerHTML = '<span class="ok">Concluído e saldos atualizados. Detalhes na aba Atividade.</span>';
+          } catch { /* ok */ }
+        }, 30000);
       };
     }
   };
@@ -1202,7 +1211,8 @@ $('btn-remover').onclick = () => {
       <label class="check"><input type="radio" name="rm" value="grupo"> Todas as <b>${doGrupo.length}</b> carteiras do grupo importado "<b>${esc(nomeGrupo)}</b>" ${totalGrupo ? '(' + esc(dolar(totalGrupo)) + ' no total)' : ''}</label>
       <p class="ajuda">As outras carteiras (suas e de outros grupos) não são tocadas.</p>`
     : `<p>Carteira: <b>${esc(c.name)}</b> ${totais[c.index] ? '(' + esc(dolar(totais[c.index])) + ')' : ''}</p>`}
-    <div id="rm-aviso"></div>
+    <div id="rm-aviso"><p class="cinza">🔄 Conferindo os saldos reais na rede…</p></div>
+    <button id="rm-reverificar" class="mini">🔄 Reverificar saldos</button>
     <label>Sua senha</label>
     <input id="rm-senha" type="password">
     <p id="m-erro" class="erro"></p>
@@ -1212,12 +1222,23 @@ $('btn-remover').onclick = () => {
   const avisar = () => {
     const comSaldo = alvo().filter((x) => (totais[x.index] || 0) >= 0.01);
     $('rm-aviso').innerHTML = comSaldo.length
-      ? `<p class="alerta-rede">⚠️ ${comSaldo.length === 1 ? 'Esta carteira ainda tem' : comSaldo.length + ' dessas carteiras ainda têm'} saldo (${esc(dolar(comSaldo.reduce((a, x) => a + (totais[x.index] || 0), 0)))}). Se quiser, use antes o <b>Juntar saldos</b>.</p>`
-      : '';
+      ? `<p class="alerta-rede">⚠️ ${comSaldo.length === 1 ? 'Esta carteira ainda tem' : comSaldo.length + ' dessas carteiras ainda têm'} saldo (${esc(dolar(comSaldo.reduce((a, x) => a + (totais[x.index] || 0), 0)))}), conferido agora na rede: ${comSaldo.slice(0, 8).map((x) => esc(x.name) + ' ' + esc(dolar(totais[x.index]))).join(', ')}${comSaldo.length > 8 ? '…' : ''}. Se quiser, use antes o <b>Juntar saldos</b>.</p>`
+      : '<p class="ok">✅ Saldos conferidos: nada relevante sobrando.</p>';
     $('rm-ok').textContent = alvo().length > 1 ? `Remover ${alvo().length} carteiras` : 'Remover';
   };
+  const reconferir = async () => {
+    $('rm-aviso').innerHTML = '<p class="cinza">🔄 Conferindo os saldos reais na rede…</p>';
+    $('rm-reverificar').disabled = true;
+    try {
+      const novos = await rpc('reverificarCarteiras', { indices: (doGrupo.length ? doGrupo : [c]).map((x) => x.index) });
+      for (const [i, v] of Object.entries(novos)) totais[i] = v;
+      mostrarTotais();
+    } catch { /* usa o que tem */ }
+    if ($('rm-reverificar')) { $('rm-reverificar').disabled = false; avisar(); }
+  };
+  $('rm-reverificar').onclick = reconferir;
   for (const r of document.querySelectorAll('input[name="rm"]')) r.onchange = avisar;
-  avisar();
+  reconferir();
   $('rm-ok').onclick = async () => {
     $('rm-ok').disabled = true;
     try {
