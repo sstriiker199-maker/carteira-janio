@@ -1557,24 +1557,38 @@ function autAdicionarLista(novas) {
   const lista = autContas();
   let adicionadas = 0;
   let repetidas = 0;
+  const duplicadas = [];
   for (const c of novas) {
     if (lista.some((x) => x.segredo === c.segredo)) { repetidas++; continue; }
+    // mesmo site + mesmo nome, mas chave diferente: provavelmente o 2FA foi configurado de novo
+    const igual = lista.find((x) => chaveConta(x) === chaveConta(c));
+    if (igual) duplicadas.push((c.emissor ? c.emissor + ' – ' : '') + c.nome);
     lista.push({ ...c, id: require('crypto').randomUUID(), criado: Date.now() });
     adicionadas++;
   }
   if (adicionadas) autSalvar();
-  return { adicionadas, repetidas };
+  return { adicionadas, repetidas, duplicadas };
 }
+const chaveConta = (c) => `${String(c.emissor || '').trim().toLowerCase()}|${String(c.nome || '').trim().toLowerCase()}`;
 const conferirSenha = (password) => { vault.decrypt(readJson(dataFile()).vault, password); };
 
 handle('autLista', () => {
   const agora = Date.now();
-  return autContas().map((c) => ({ id: c.id, nome: c.nome, emissor: c.emissor, digitos: c.digitos || 6, ...totp.codigo(c, agora) }));
+  const lista = autContas();
+  // contas com o mesmo site e nome: marca qual é a mais nova
+  const grupos = {};
+  for (const c of lista) (grupos[chaveConta(c)] = grupos[chaveConta(c)] || []).push(c);
+  return lista.map((c) => {
+    const g = grupos[chaveConta(c)];
+    const dup = g.length > 1;
+    const maisNova = dup && g.every((x) => (x.criado || 0) <= (c.criado || 0));
+    return { id: c.id, nome: c.nome, emissor: c.emissor, digitos: c.digitos || 6, dup, maisNova, ...totp.codigo(c, agora) };
+  });
 });
 handle('autAdicionar', ({ segredo, nome, emissor, digitos, algo, periodo }) => {
   const c = totp.normalizar({ segredo, nome, emissor, digitos, algo, periodo });
   const r = autAdicionarLista([c]);
-  if (!r.adicionadas) throw new Error('Essa conta já está no autenticador.');
+  if (!r.adicionadas) throw new Error('Essa conta já está no autenticador (mesma chave).');
   return r;
 });
 // textos lidos de QR Codes: otpauth://… (uma conta) ou otpauth-migration://… (exportação do Google)
@@ -1861,6 +1875,7 @@ app.whenReady().then(() => {
           await t('andamento', () => c('testeAndamento'));
           await t('aut manual', () => c('autAdicionar', { segredo: 'JBSW Y3DP EHPK 3PXP', nome: 'teste', emissor: 'Site' }).catch(e => e.message));
           await t('aut google', async () => { const r = await c('autImportar', { textos: ['otpauth-migration://offline?data=CikKCkhlbGxvId6tvu8SDXBpeGVsdmF1bHQyNDcaBlR3aXRjaCABKAEwAgoyChQxMjM0NTY3ODkwMTIzNDU2Nzg5MBIMZXVAZ21haWwuY29tGgZHb29nbGUgASgBMAIKMgoUYWJjZGVmZ2hpamtsbW5vcHFyc3QSDHNzdHJpaWtlcjE5ORoGR2l0SHViIAEoATACEAEYASAAKE0%3D'] }); return r.adicionadas + ' novas, ' + r.repetidas + ' repetidas, lote ' + JSON.stringify(r.lotes); });
+          await t('aut duplicada', async () => { const r = await c('autAdicionar', { segredo: 'KRSXG5CTMVRXEZLU', nome: 'teste', emissor: 'Site' }); const l = await c('autLista'); return JSON.stringify(r.duplicadas) + ' ' + l.filter(x => x.dup).map(x => x.maisNova ? 'nova' : 'antiga').join(','); });
           await t('aut lista', async () => (await c('autLista')).map(x => x.emissor + ':' + x.nome + '=' + x.codigo.length + 'dig ' + x.resta + 's').join(' ; '));
           await t('aut jsQR', async () => {
             const r = await c('receive', { index: 0, assetId: 'btc' });

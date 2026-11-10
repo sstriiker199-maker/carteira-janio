@@ -38,6 +38,7 @@ async function abrirAutenticador() {
       <button id="aut-sel-sair">Cancelar</button>
     </div>
     <p class="sub">Códigos de verificação em duas etapas (2FA). As chaves ficam cifradas com a senha da carteira e somem da tela quando ela bloqueia.</p>
+    <div id="aut-aviso-dup" class="alerta hidden"></div>
     <input id="aut-busca" placeholder="Buscar conta (ex.: Twitch)" spellcheck="false" value="${esc(autFiltro)}">
     <div id="aut-lista" class="aut-lista"><p class="cinza">Carregando…</p></div>
     <div class="linha"><button id="m-fechar">Fechar</button></div>`);
@@ -75,7 +76,14 @@ async function autDesenhar(refazer) {
     $('aut-sel-remover').disabled = !autSel.size;
     $('aut-sel-remover').textContent = autSel.size ? `Remover selecionadas (${autSel.size})` : 'Remover selecionadas';
   }
-  const mudou = refazer || vis.length !== autUltima.length || vis.some((c, i) => !autUltima[i] || autUltima[i].id !== c.id || autUltima[i].nome !== c.nome || autUltima[i].emissor !== c.emissor);
+  // aviso no topo quando há contas duplicadas
+  const dups = lista.filter((c) => c.dup && !c.maisNova);
+  const avisoDup = $('aut-aviso-dup');
+  if (avisoDup) {
+    avisoDup.classList.toggle('hidden', !dups.length);
+    avisoDup.innerHTML = dups.length ? `⚠ Você tem a mesma conta mais de uma vez (${esc([...new Set(dups.map((c) => (c.emissor ? c.emissor + ' – ' : '') + c.nome))].join(', '))}). Isso acontece quando o 2FA é configurado de novo no site: normalmente só a <b>mais nova</b> funciona. Teste o código dela e remova a <b>antiga</b>.` : '';
+  }
+  const mudou = refazer || vis.length !== autUltima.length || vis.some((c, i) => !autUltima[i] || autUltima[i].id !== c.id || autUltima[i].nome !== c.nome || autUltima[i].emissor !== c.emissor || autUltima[i].dup !== c.dup || autUltima[i].maisNova !== c.maisNova);
   autUltima = vis;
   if (!lista.length) {
     box.innerHTML = `<div class="aut-vazio"><p>Nenhuma conta ainda.</p><p class="cinza">Clique em <b>Importar do Google Authenticator</b> para trazer as suas contas do celular, ou em <b>+ Adicionar conta</b>.</p></div>`;
@@ -85,7 +93,7 @@ async function autDesenhar(refazer) {
     box.innerHTML = vis.map((c) => `
       <div class="aut-card${autSelecionando ? ' selecionando' : ''}${autSel.has(c.id) ? ' marcada' : ''}" data-id="${esc(c.id)}">
         ${autSelecionando ? `<input type="checkbox" class="aut-check" aria-label="Selecionar ${esc(c.emissor || c.nome)}" ${autSel.has(c.id) ? 'checked' : ''}>` : ''}
-        <div class="aut-cab"><div class="aut-nomes"><span class="aut-emissor">${esc(c.emissor || 'Conta')}</span><span class="aut-nome">${esc(c.nome)}</span></div>
+        <div class="aut-cab"><div class="aut-nomes"><span class="aut-emissor">${esc(c.emissor || 'Conta')}</span><span class="aut-nome">${esc(c.nome)}</span>${c.dup ? `<span class="aut-dup ${c.maisNova ? 'nova' : ''}">${c.maisNova ? '⚠ duplicada · mais nova' : '⚠ duplicada · antiga'}</span>` : ''}</div>
           <div class="aut-menu"><button class="mini" data-aut="ren">Editar</button><button class="mini" data-aut="qr">QR</button><button class="mini perigo-borda" data-aut="del">Remover</button></div></div>
         <button class="aut-codigo" data-aut="copiar" title="Clique para copiar"><span data-cod></span></button>
         <div class="aut-rodape"><div class="aut-barra"><div data-barra></div></div><span class="aut-resta" data-resta></span><span class="aut-prox cinza" data-prox></span></div>
@@ -212,6 +220,11 @@ function autAdicionarTela() {
       </div>
       <label>Chave secreta (letras e números que o site mostra)</label>
       <input id="a-segredo" placeholder="ex.: JBSW Y3DP EHPK 3PXP" spellcheck="false" autocomplete="off">
+      <div class="grade2">
+        <div><label>Dígitos</label><select id="a-dig"><option value="6" selected>6 dígitos (padrão)</option><option value="7">7 dígitos</option><option value="8">8 dígitos</option></select></div>
+        <div><label>Troca a cada</label><select id="a-per"><option value="30" selected>30 segundos (padrão)</option><option value="10">10 segundos</option><option value="15">15 segundos</option><option value="60">60 segundos</option></select></div>
+      </div>
+      <p class="ajuda">Deixe no padrão. Só mude se o site disser outro valor (a Twitch pode usar 7 dígitos a cada 10 s). Pelo QR Code isso já vem certo.</p>
       <p id="a-erro" class="erro"></p>
     </div>
     <div class="linha"><button id="a-voltar">Voltar</button><button id="a-ok" class="primario">Adicionar</button></div>`);
@@ -220,9 +233,11 @@ function autAdicionarTela() {
     $('a-erro').textContent = '';
     try {
       const seg = $('a-segredo').value.trim();
-      if (/^otpauth/i.test(seg)) await rpc('autImportar', { textos: [seg] });
-      else await rpc('autAdicionar', { segredo: seg, nome: $('a-nome').value, emissor: $('a-emissor').value });
-      aviso('Conta adicionada ✓');
+      const r = /^otpauth/i.test(seg)
+        ? await rpc('autImportar', { textos: [seg] })
+        : await rpc('autAdicionar', { segredo: seg, nome: $('a-nome').value, emissor: $('a-emissor').value, digitos: Number($('a-dig').value), periodo: Number($('a-per').value) });
+      if (r && r.duplicadas && r.duplicadas.length) aviso(`Atenção: ${r.duplicadas.join(', ')} já existia com outra chave — agora há duas. Use a mais nova e remova a antiga.`);
+      else aviso('Conta adicionada ✓');
       abrirAutenticador();
     } catch (e) { $('a-erro').textContent = e.message; }
   };
@@ -286,6 +301,7 @@ function autLigarLeitor(aoLer, fecharAoLer) {
       const r = await aoLer(texto);
       if (r == null) return false;
       msg(`Lido ✓ (${r.adicionadas} conta(s) nova(s))`, 'ok');
+      if (r.duplicadas && r.duplicadas.length) aviso(`Atenção: ${r.duplicadas.join(', ')} já existia com outra chave — agora há duas. Use a mais nova e remova a antiga.`);
       if (fecharAoLer && r.adicionadas) { aviso('Conta adicionada ✓'); abrirAutenticador(); }
       return true;
     } catch (e) { msg(e.message, 'erro'); return false; }

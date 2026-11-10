@@ -325,3 +325,6 @@ details.ajuda summary { cursor: pointer; }
 .aut-check { position: absolute; left: 14px; top: 16px; width: 18px; height: 18px; margin: 0; pointer-events: none; }
 .aut-remover-lista { max-height: 180px; overflow-y: auto; margin: 0 0 12px; font-size: 13px; color: var(--mut); }
 .aut-cfg { font-size: 11px; margin-top: -2px; }
+.aut-dup { font-size: 10.5px; color: var(--desce); margin-top: 3px; }
+.aut-dup.nova { color: var(--sobe); }
+#aut-aviso-dup { margin: 10px 0; font-size: 13px; }
