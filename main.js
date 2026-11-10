@@ -76,6 +76,7 @@ function settings() {
       toncenter: s.chaves && s.chaves.toncenter ? alertas.decifrar(s.chaves.toncenter) : ''
     },
     intervalo: Math.max(3, Number(s.intervalo) || 3),
+    todasIntervalo: s.todasIntervalo != null ? s.todasIntervalo : 'auto',
     carteiraTaxas: s.carteiraTaxas != null ? Number(s.carteiraTaxas) : null,
     notificar: { entradas: n.entradas !== false, envios: n.envios !== false },
     email: {
@@ -401,6 +402,7 @@ let rodando = false;
 let pedirDeNovo = false;
 let rodizio = 0;
 let ultimoTanque = 0;
+let ultimoTodas = 0;
 const saldosMem = {}; // índice da carteira -> { assetId: { raw, decimals } }
 
 function valorUsd(assetId, raw, decimals) {
@@ -580,8 +582,15 @@ async function cicloMonitor() {
       const agora = Date.now();
       // carteira aberta: sempre. As outras: em rodízio, algumas por ciclo (aguenta centenas de carteiras)
       const outras = data.wallets.filter((w) => w.index !== foco);
-      const lote = [];
-      if (outras.length) {
+      let lote = [];
+      // "todas as carteiras a cada X s": automático (poucas carteiras = todas sempre), número fixo, ou rodízio
+      const modo = settings().todasIntervalo;
+      const intervTodas = modo === 'rodizio' ? null
+        : modo === 'auto' ? (outras.length <= 10 ? 15000 : outras.length <= 30 ? 60000 : null)
+        : Number(modo) * 1000;
+      if (intervTodas && outras.length) {
+        if (agora - ultimoTodas >= intervTodas) { lote = outras; ultimoTodas = agora; }
+      } else if (outras.length) {
         const porCiclo = ultimoGeral === 0 ? Math.min(outras.length, 4) : outras.length <= 20 ? 2 : 1;
         for (let i = 0; i < porCiclo; i++) lote.push(outras[(rodizio + i) % outras.length]);
         rodizio = (rodizio + porCiclo) % outras.length;
@@ -614,7 +623,17 @@ handle('monitorFoco', ({ index }) => {
   if (w && session) verificarCarteira(w, true).then(enviarResumo).catch(() => {});
   return true;
 });
-handle('monitorAgora', () => { cicloMonitor(); return true; });
+handle('monitorAgora', () => { ultimoTodas = 0; cicloMonitor(); return true; });
+
+// Botão "Atualizar saldos": confere todas as carteiras agora
+handle('atualizarTodas', async () => {
+  requireUnlocked();
+  const data = readJson(dataFile());
+  await mapLimit(data.wallets, 2, async (w) => { await verificarCarteira(w, w.index === foco); enviarResumo(); });
+  ultimoTodas = Date.now();
+  try { salvarCache(); } catch { /* ok */ }
+  return data.wallets.length;
+});
 handle('resumo', () => resumo());
 
 // Cartão da carteira de taxas (topo da barra lateral)
@@ -1151,7 +1170,7 @@ function montarEmail(email, anterior) {
   };
 }
 
-handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteiraTaxas, chaves }) => {
+handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteiraTaxas, chaves, todasIntervalo }) => {
   const clean = {};
   for (const id of Object.keys(NETWORKS)) {
     const u = String((rpc && rpc[id]) || '').trim();
@@ -1171,6 +1190,7 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteira
     },
     swap: (readJson(cfgFile()) || {}).swap,
     intervalo: Math.max(3, Number(intervalo) || 3),
+    todasIntervalo: ['auto', 'rodizio'].includes(todasIntervalo) ? todasIntervalo : Math.max(10, Number(todasIntervalo) || 30),
     carteiraTaxas: carteiraTaxas === '' || carteiraTaxas == null ? null : Number(carteiraTaxas),
     notificar: { entradas: !(notificar && notificar.entradas === false), envios: !(notificar && notificar.envios === false) },
     email: em
@@ -1347,6 +1367,7 @@ app.whenReady().then(() => {
           await t('trx max sem saldo', () => c('estimate', { index: 1, assetId: 'trx', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', max: true }));
           await t('bnb max sem saldo', () => c('estimate', { index: 1, assetId: 'bnb', to: '0x000000000000000000000000000000000000dEaD', max: true }));
           await t('reverificar', () => c('reverificarCarteiras', { indices: [0, 1] }));
+          await t('atualizar todas', () => c('atualizarTodas'));
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));

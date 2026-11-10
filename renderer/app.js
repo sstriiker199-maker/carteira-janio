@@ -393,7 +393,14 @@ window.api.onSaldos((d) => {
   mostrarTotais();
 });
 
-$('btn-atualizar').onclick = () => rpc('monitorAgora').catch(() => {});
+$('btn-atualizar').onclick = async () => {
+  const b = $('btn-atualizar');
+  b.disabled = true;
+  b.textContent = 'Atualizando todas…';
+  try { const n = await rpc('atualizarTodas'); aviso(`Saldos de ${n} carteiras atualizados`); } catch (e) { aviso(e.message); }
+  b.disabled = false;
+  b.textContent = 'Atualizar saldos';
+};
 $('so-com-saldo').onchange = () => atualizarCelulas();
 
 for (const b of document.querySelectorAll('[data-copiar]')) {
@@ -1269,7 +1276,12 @@ $('btn-config').onclick = async () => {
     <h3>Atualização dos saldos</h3>
     <label>Atualizar a carteira aberta a cada</label>
     <select id="c-intervalo">${[3, 5, 10, 30, 60].map((n) => `<option value="${n}" ${s.intervalo === n ? 'selected' : ''}>${n} segundos</option>`).join('')}</select>
-    <p class="ajuda">As outras carteiras são conferidas em rodízio, uma ou duas por vez (com 80 carteiras, a volta completa leva uns 4 minutos).</p>
+    <label>Atualizar as outras carteiras (todas)</label>
+    <select id="c-todas">
+      ${[['auto', 'Automático (recomendado): até 10 carteiras = todas a cada 15 s'], ['10', 'Todas a cada 10 segundos'], ['15', 'Todas a cada 15 segundos'], ['30', 'Todas a cada 30 segundos'], ['60', 'Todas a cada 1 minuto'], ['300', 'Todas a cada 5 minutos'], ['rodizio', 'Rodízio (uma ou duas por vez — para centenas de carteiras)']]
+        .map(([v, t]) => `<option value="${v}" ${String(s.todasIntervalo) === v ? 'selected' : ''}>${t}</option>`).join('')}
+    </select>
+    <p class="ajuda">Com poucas carteiras, deixe no Automático ou em 10–15 s. Com muitas (100+), use Rodízio para não ser bloqueado pelos servidores.</p>
 
     <div class="secao">
       <h3>Carteira de taxas</h3>
@@ -1360,6 +1372,7 @@ $('btn-config').onclick = async () => {
         tronApiKey: $('c-tronkey').value,
         chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value },
         intervalo: Number($('c-intervalo').value),
+        todasIntervalo: $('c-todas').value,
         carteiraTaxas: $('c-taxas').value,
         notificar: { entradas: $('c-not-entradas').checked, envios: $('c-not-envios').checked },
         email: emailForm()
