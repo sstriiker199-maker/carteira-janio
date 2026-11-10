@@ -22,6 +22,21 @@ const NETWORKS = {
     standard: 'Avalanche C-Chain', rpc: 'https://avalanche-c-chain-rpc.publicnode.com',
     explorer: 'https://snowtrace.io/tx/', minPriorityGwei: 0
   },
+  arbitrum: {
+    id: 'arbitrum', rotulo: 'Arbitrum One', name: 'Arbitrum', kind: 'evm', chainId: 42161, symbol: 'ETH',
+    standard: 'Arbitrum', rpc: 'https://arbitrum-one-rpc.publicnode.com',
+    explorer: 'https://arbiscan.io/tx/', minPriorityGwei: 0
+  },
+  base: {
+    id: 'base', rotulo: 'Base', name: 'Base', kind: 'evm', chainId: 8453, symbol: 'ETH', opStack: true,
+    standard: 'Base', rpc: 'https://base-rpc.publicnode.com',
+    explorer: 'https://basescan.org/tx/', minPriorityGwei: 0.001
+  },
+  optimism: {
+    id: 'optimism', rotulo: 'Optimism', name: 'Optimism', kind: 'evm', chainId: 10, symbol: 'ETH', opStack: true,
+    standard: 'Optimism', rpc: 'https://optimism-rpc.publicnode.com',
+    explorer: 'https://optimistic.etherscan.io/tx/', minPriorityGwei: 0.001
+  },
   bitcoin: {
     id: 'bitcoin', rotulo: 'Bitcoin', name: 'Bitcoin', kind: 'utxo', coin: 'btc', symbol: 'BTC',
     standard: 'Bitcoin', rpc: 'https://mempool.space/api', explorer: 'https://mempool.space/tx/', lento: 30000
@@ -53,6 +68,26 @@ const NETWORKS = {
   cardano: {
     id: 'cardano', rotulo: 'Cardano', name: 'Cardano', kind: 'cardano', symbol: 'ADA',
     standard: 'Cardano', rpc: 'https://api.koios.rest/api/v1', explorer: 'https://cardanoscan.io/transaction/', lento: 30000
+  },
+  sui: {
+    id: 'sui', rotulo: 'Sui', name: 'Sui', kind: 'sui', symbol: 'SUI',
+    standard: 'Sui', rpc: 'https://fullnode.mainnet.sui.io:443',
+    explorer: 'https://suiscan.xyz/mainnet/tx/', lento: 10000
+  },
+  aptos: {
+    id: 'aptos', rotulo: 'Aptos', name: 'Aptos', kind: 'aptos', symbol: 'APT',
+    standard: 'Aptos', rpc: 'https://api.mainnet.aptoslabs.com/v1',
+    explorer: 'https://explorer.aptoslabs.com/txn/', explorerFim: '?network=mainnet', lento: 15000
+  },
+  cosmos: {
+    id: 'cosmos', rotulo: 'Cosmos Hub', name: 'Cosmos Hub', kind: 'cosmos', symbol: 'ATOM', memo: 'memo',
+    standard: 'Cosmos', rpc: 'https://cosmos-rpc.publicnode.com:443', reserva: ['https://rpc.cosmos.directory/cosmoshub'],
+    explorer: 'https://www.mintscan.io/cosmos/tx/', lento: 15000
+  },
+  polkadot: {
+    id: 'polkadot', rotulo: 'Polkadot (Asset Hub)', name: 'Polkadot Asset Hub', kind: 'polkadot', symbol: 'DOT',
+    standard: 'Polkadot', rpc: 'wss://polkadot-asset-hub-rpc.polkadot.io', reserva: ['wss://asset-hub-polkadot-rpc.n.dwellir.com'],
+    explorer: 'https://assethub-polkadot.subscan.io/extrinsic/', lento: 20000
   },
   tron: {
     id: 'tron', rotulo: 'Tron (TRC-20)', name: 'Tron', kind: 'tron', symbol: 'TRX',
@@ -94,7 +129,23 @@ const ASSETS = [
   { id: 'shib', symbol: 'SHIB', name: 'Shiba Inu', network: 'ethereum', contract: '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE', decimals: 18 },
   { id: 'pepe', symbol: 'PEPE', name: 'Pepe',      network: 'ethereum', contract: '0x6982508145454Ce325dDbE47a25d4ec3d2311933', decimals: 18 },
   { id: 'bonk', symbol: 'BONK', name: 'Bonk',      network: 'solana',   contract: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', decimals: 5 },
-  { id: 'ton',  symbol: 'TON',  name: 'Toncoin',   network: 'ton',      native: true, decimals: 9 }
+  { id: 'ton',  symbol: 'TON',  name: 'Toncoin',   network: 'ton',      native: true, decimals: 9 },
+
+  // Redes de segunda camada do Ethereum (mesmo endereço 0x...)
+  { id: 'eth-arb',  symbol: 'ETH',  name: 'Ethereum', network: 'arbitrum', native: true, decimals: 18 },
+  { id: 'usdc-arb', symbol: 'USDC', name: 'USD Coin', network: 'arbitrum', contract: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 },
+  { id: 'usdt-arb', symbol: 'USDT', name: 'Tether',   network: 'arbitrum', contract: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', decimals: 6 },
+  { id: 'eth-base',  symbol: 'ETH',  name: 'Ethereum', network: 'base', native: true, decimals: 18 },
+  { id: 'usdc-base', symbol: 'USDC', name: 'USD Coin', network: 'base', contract: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
+  { id: 'eth-op',  symbol: 'ETH',  name: 'Ethereum', network: 'optimism', native: true, decimals: 18 },
+  { id: 'usdc-op', symbol: 'USDC', name: 'USD Coin', network: 'optimism', contract: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals: 6 },
+  { id: 'usdt-op', symbol: 'USDT', name: 'Tether',   network: 'optimism', contract: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 6 },
+
+  // Redes novas
+  { id: 'sui',  symbol: 'SUI',  name: 'Sui',      network: 'sui',      native: true, decimals: 9 },
+  { id: 'apt',  symbol: 'APT',  name: 'Aptos',    network: 'aptos',    native: true, decimals: 8 },
+  { id: 'atom', symbol: 'ATOM', name: 'Cosmos',   network: 'cosmos',   native: true, decimals: 6 },
+  { id: 'dot',  symbol: 'DOT',  name: 'Polkadot', network: 'polkadot', native: true, decimals: 10 }
 ];
 
 module.exports = { NETWORKS, ASSETS };

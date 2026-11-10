@@ -1,4 +1,4 @@
-// Ethereum, BNB Chain, Polygon e Avalanche (todas usam o mesmo tipo de carteira 0x...)
+// Ethereum, BNB Chain, Polygon, Avalanche, Arbitrum, Base e Optimism (todas usam o mesmo tipo de carteira 0x...)
 const { JsonRpcProvider, Network, Contract, Interface, isAddress, getAddress, parseUnits } = require('ethers');
 const { parseAmount, fmt } = require('./util');
 
@@ -61,6 +61,17 @@ async function fees(net, p) {
 
 const VELOCIDADES = ['economica', 'normal', 'rapida'];
 
+// Base e Optimism cobram também uma "taxa de dados" para gravar a transação no Ethereum.
+// Ela não aparece no cálculo normal do gás; o contrato oráculo da rede informa o teto.
+const ORACULO_L1 = new Interface(['function getL1FeeUpperBound(uint256) view returns (uint256)']);
+async function taxaL1(net, p, tamanho) {
+  if (!net.opStack) return 0n;
+  try {
+    const r = await p.call({ to: '0x420000000000000000000000000000000000000F', data: ORACULO_L1.encodeFunctionData('getL1FeeUpperBound', [tamanho]) });
+    return (BigInt(ORACULO_L1.decodeFunctionResult('getL1FeeUpperBound', r)[0]) * 12n) / 10n;
+  } catch { return 0n; }
+}
+
 // Monta a transação e confere saldo e taxa. Não envia nada.
 // valorRaw: valor exato em unidades mínimas (usado pela carteira de taxas)
 async function prepare({ net, url, asset, wallet, to, amount, max, velocidade, valorRaw }) {
@@ -78,7 +89,8 @@ async function prepare({ net, url, asset, wallet, to, amount, max, velocidade, v
   if (asset.native) {
     let gasLimit = 21000n;
     try { gasLimit = await p.estimateGas({ from, to, value: 1n }); } catch { /* usa 21000 */ }
-    const feeMax = gasLimit * f.worst;
+    const l1 = await taxaL1(net, p, 130);
+    const feeMax = gasLimit * f.worst + l1;
     const value = valorRaw != null ? BigInt(valorRaw) : max ? nativeBal - feeMax : parseAmount(amount, asset.decimals);
     if (value <= 0n) {
       throw new Error(nativeBal === 0n ? `Esta carteira não tem ${asset.symbol}.` : `Sobrou só poeira: ${fmt(nativeBal, 18)} ${asset.symbol} não paga a taxa (${fmt(feeMax, 18)} ${net.symbol}).`);
@@ -88,8 +100,8 @@ async function prepare({ net, url, asset, wallet, to, amount, max, velocidade, v
     }
     return {
       tx: { to, value, gasLimit, ...f.fields }, value, decimals: asset.decimals, to,
-      fee: gasLimit * f.esperado, feeMax, feeDecimals: 18, velocidade: vel,
-      opcoes: Object.fromEntries(VELOCIDADES.map((v) => [v, gasLimit * tiers[v].esperado]))
+      fee: gasLimit * f.esperado + l1, feeMax, feeDecimals: 18, velocidade: vel,
+      opcoes: Object.fromEntries(VELOCIDADES.map((v) => [v, gasLimit * tiers[v].esperado + l1]))
     };
   }
 
@@ -101,12 +113,13 @@ async function prepare({ net, url, asset, wallet, to, amount, max, velocidade, v
   if (value > tokBal) throw new Error(`Saldo de ${asset.symbol} insuficiente (você tem ${fmt(tokBal, decimals)}).`);
   const data = ERC20.encodeFunctionData('transfer', [to, value]);
   let gasLimit;
-  try { gasLimit = (await p.estimateGas({ from, to: asset.contract, data })) * 12n / 10n; } catch { gasLimit = 120000n; }
-  const feeMax = gasLimit * f.worst;
+  try { gasLimit = (await p.estimateGas({ from, to: asset.contract, data })) * 12n / 10n; } catch { gasLimit = net.id === 'arbitrum' ? 1000000n : 120000n; }
+  const l1 = await taxaL1(net, p, 200);
+  const feeMax = gasLimit * f.worst + l1;
   return {
     tx: { to: asset.contract, data, value: 0n, gasLimit, ...f.fields }, value, decimals, to,
-    fee: gasLimit * f.esperado, feeMax, feeDecimals: 18, velocidade: vel,
-    opcoes: Object.fromEntries(VELOCIDADES.map((v) => [v, gasLimit * tiers[v].esperado])),
+    fee: gasLimit * f.esperado + l1, feeMax, feeDecimals: 18, velocidade: vel,
+    opcoes: Object.fromEntries(VELOCIDADES.map((v) => [v, gasLimit * tiers[v].esperado + l1])),
     nativeBal,
     faltaTaxa: feeMax > nativeBal ? feeMax - nativeBal : 0n
   };

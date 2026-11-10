@@ -5,7 +5,8 @@ const BASE = 'https://sideshift.ai/api/v2';
 const REDE = {
   ethereum: 'ethereum', bsc: 'bsc', polygon: 'polygon', avalanche: 'avax', tron: 'tron', bitcoin: 'bitcoin',
   litecoin: 'litecoin', dogecoin: 'doge', bitcoincash: 'bitcoincash', solana: 'solana', xrp: 'ripple',
-  ton: 'ton', cardano: 'cardano'
+  ton: 'ton', cardano: 'cardano', arbitrum: 'arbitrum', base: 'base', optimism: 'optimism',
+  sui: 'sui', aptos: 'aptos', cosmos: 'cosmos', polkadot: 'polkadot'
 };
 
 async function req(caminho, { method = 'GET', body, secret } = {}) {
@@ -60,4 +61,4 @@ function criarTroca({ secret, affiliateId, quoteId, settleAddress, refundAddress
 
 const status = (id) => req('/shifts/' + id);
 
-module.exports = { REDE, suportado, permissoes, criarConta, cotar, criarTroca, status };
+module.exports = { moedasLista: moedas, REDE, suportado, permissoes, criarConta, cotar, criarTroca, status };

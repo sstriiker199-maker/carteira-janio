@@ -22,7 +22,19 @@ const MOD = {
   solana: () => require('./src/solana'),
   xrp: () => require('./src/xrp'),
   ton: () => require('./src/ton'),
-  cardano: () => require('./src/cardano')
+  cardano: () => require('./src/cardano'),
+  sui: () => require('./src/sui'),
+  aptos: () => require('./src/aptos'),
+  cosmos: () => require('./src/cosmos'),
+  polkadot: () => require('./src/polkadot')
+};
+// redes de chave ed25519: caminho de derivação de cada uma (i = número da carteira)
+const CAMINHO_ED = {
+  solana: (i) => `m/44'/501'/${i}'/0'`,
+  ton: (i) => `m/44'/607'/${i}'`,
+  sui: (i) => `m/44'/784'/${i}'/0'/0'`,
+  aptos: (i) => `m/44'/637'/${i}'/0'/0'`,
+  polkadot: (i) => `m/44'/354'/${i}'/0'/0'`
 };
 
 // Mantém os dados na mesma pasta de sempre, mesmo com o nome novo do programa
@@ -131,17 +143,15 @@ class Indisponivel extends Error {}
 function chaveRede(index, net) {
   const k = keysFor(index);
   if (k.redes[net.id]) return k.redes[net.id];
-  if (k.soEvm) throw new Indisponivel('Carteira importada por chave privada: só funciona em Ethereum, BNB, Polygon, Avalanche e Tron.');
+  if (k.soEvm) throw new Indisponivel('Carteira importada por chave privada: só funciona nas redes 0x (Ethereum, BNB, Polygon, Avalanche, Arbitrum, Base, Optimism) e Tron.');
   const m = Mnemonic.fromPhrase(k.frase);
   let chave;
-  if (net.kind === 'utxo' || net.kind === 'xrp') {
-    const caminho = net.kind === 'xrp' ? "m/44'/144'/0'/0/" : MOD.utxo().REDES[net.coin].caminho;
+  if (net.kind === 'utxo' || net.kind === 'xrp' || net.kind === 'cosmos') {
+    const caminho = net.kind === 'xrp' ? "m/44'/144'/0'/0/" : net.kind === 'cosmos' ? "m/44'/118'/0'/0/" : MOD.utxo().REDES[net.coin].caminho;
     const w = HDNodeWallet.fromMnemonic(m, caminho + k.d);
     chave = { priv: w.privateKey, pubkey: Buffer.from(getBytes(w.publicKey)) };
-  } else if (net.kind === 'solana') {
-    chave = { seed32: ed25519.derivar(m.computeSeed(), `m/44'/501'/${k.d}'/0'`) };
-  } else if (net.kind === 'ton') {
-    chave = { seed32: ed25519.derivar(m.computeSeed(), `m/44'/607'/${k.d}'`) };
+  } else if (CAMINHO_ED[net.kind]) {
+    chave = { seed32: ed25519.derivar(m.computeSeed(), CAMINHO_ED[net.kind](k.d)) };
   } else if (net.kind === 'cardano') {
     chave = { entropia: m.entropy, conta: k.d };
   }
@@ -156,13 +166,13 @@ function addressFor(index, networkId) {
   if (net.kind === 'evm') return k.evm.address;
   if (!k.ends[networkId]) {
     const chave = chaveRede(index, net);
-    k.ends[networkId] = net.kind === 'utxo' ? MOD.utxo().endereco(net.coin, chave.pubkey) : MOD[net.kind]().endereco(net.kind === 'solana' || net.kind === 'ton' ? chave.seed32 : chave);
+    k.ends[networkId] = net.kind === 'utxo' ? MOD.utxo().endereco(net.coin, chave.pubkey) : MOD[net.kind]().endereco(CAMINHO_ED[net.kind] ? chave.seed32 : chave);
   }
   return k.ends[networkId];
 }
 
 // Lista de servidores de cada rede, em ordem: o seu (se colocou), o da sua chave de API, e o gratuito por último
-const ALCHEMY = { ethereum: 'eth-mainnet', bsc: 'bnb-mainnet', polygon: 'polygon-mainnet', avalanche: 'avax-mainnet' };
+const ALCHEMY = { ethereum: 'eth-mainnet', bsc: 'bnb-mainnet', polygon: 'polygon-mainnet', avalanche: 'avax-mainnet', arbitrum: 'arb-mainnet', base: 'base-mainnet', optimism: 'opt-mainnet' };
 function servidores(net) {
   const s = settings();
   const lista = [];
@@ -172,6 +182,7 @@ function servidores(net) {
   if (net.id === 'tron' && s.tronApiKey) lista.push({ rpc: net.rpc, apiKey: s.tronApiKey, origem: 'TronGrid (chave)' });
   if (net.id === 'ton' && s.chaves.toncenter) lista.push({ rpc: net.rpc, apiKey: s.chaves.toncenter, origem: 'toncenter (chave)' });
   lista.push({ rpc: net.rpc, origem: 'gratuito' });
+  for (const r of net.reserva || []) lista.push({ rpc: r, origem: 'gratuito (reserva)' });
   const vistos = new Set();
   return lista.filter((x) => { const k = x.rpc + '|' + (x.apiKey || ''); if (vistos.has(k)) return false; vistos.add(k); return true; });
 }
@@ -195,7 +206,7 @@ async function comReserva(net, fn) {
 
 function linkExplorer(net, hash) {
   if (net.kind === 'ton') return net.explorer + String(hash).split(':')[0];
-  return net.explorer + hash;
+  return net.explorer + hash + (net.explorerFim || '');
 }
 
 function getWallet(data, index) {
@@ -691,19 +702,20 @@ handle('verificarEndereco', ({ assetId, endereco }) => {
   for (const n of Object.values(NETWORKS)) {
     const grupo = n.kind === 'evm' ? 'evm' : n.id;
     if (vistas.has(grupo)) continue;
-    if (enderecoValidoPara(n, a)) { vistas.add(grupo); redes.push(n.kind === 'evm' ? 'Ethereum/BNB/Polygon/Avalanche (0x)' : n.rotulo); }
+    if (enderecoValidoPara(n, a)) { vistas.add(grupo); redes.push(n.kind === 'evm' ? 'redes 0x (Ethereum, BNB, Polygon, Avalanche, Arbitrum, Base, Optimism)' : n.rotulo); }
   }
   const nomeMoeda = `${asset.symbol} pela rede ${net.rotulo}`;
   if (enderecoValidoPara(net, a)) {
     let msg = `Endereço válido da rede ${net.kind === 'evm' ? net.rotulo : net.rotulo}.`;
     if (net.kind === 'evm') msg += ` Endereços 0x servem para várias redes: confira se o destino aceita ${net.rotulo}.`;
+    if (net.kind === 'sui' || net.kind === 'aptos') msg += ` Endereços da Sui e da Aptos têm o mesmo formato: confira se o destino é mesmo da rede ${net.rotulo}.`;
     let meu = null;
     try {
       const data = readJson(dataFile());
       const w = data.wallets.find((x) => { try { return addressFor(x.index, net.id).toLowerCase() === a.toLowerCase(); } catch { return false; } });
       if (w) meu = w.name;
     } catch { /* ok */ }
-    return { estado: net.kind === 'evm' ? 'atencao' : 'ok', mensagem: msg + (meu ? ` É a sua carteira "${meu}".` : '') };
+    return { estado: ['evm', 'sui', 'aptos'].includes(net.kind) ? 'atencao' : 'ok', mensagem: msg + (meu ? ` É a sua carteira "${meu}".` : '') };
   }
   if (redes.length) {
     return { estado: 'bloqueado', mensagem: `Este endereço é da rede ${redes.join(' / ')}, mas você está enviando ${nomeMoeda}. Envio bloqueado: o dinheiro seria perdido.` };
@@ -866,6 +878,61 @@ handle('swapComparar', async ({ index, de, para, amount, destinoIndex }) => {
   };
 });
 
+// Quais moedas dá para trocar a partir de uma moeda, e por qual serviço
+let paresCache = { t: 0 };
+async function listasDeTroca() {
+  if (Date.now() - paresCache.t < 10 * 60 * 1000) return paresCache;
+  const ch = settings().chaves;
+  const [ss, cn, thor] = await Promise.allSettled([swap.moedasLista(), trocas.cnLista(ch.changenow), trocas.thorPausadas()]);
+  paresCache = {
+    t: Date.now(),
+    ss: ss.status === 'fulfilled' ? ss.value : null, ssErro: ss.status === 'rejected' ? String(ss.reason.message || ss.reason) : '',
+    cn: cn.status === 'fulfilled' ? cn.value : null, cnErro: cn.status === 'rejected' ? String(cn.reason.message || cn.reason) : '',
+    thor: thor.status === 'fulfilled' ? thor.value : null, thorErro: thor.status === 'rejected' ? String(thor.reason.message || thor.reason) : ''
+  };
+  if (!paresCache.ss && !paresCache.cn && !paresCache.thor) paresCache.t = 0;
+  return paresCache;
+}
+
+handle('swapPares', async ({ assetId }) => {
+  const A = getAsset(assetId);
+  const L = await listasDeTroca();
+  const temChaveCn = !!settings().chaves.changenow;
+  const ssDe = (a) => {
+    if (!L.ss) return false;
+    const rede = swap.REDE[a.network];
+    const c = L.ss.find((x) => String(x.coin).toUpperCase() === a.symbol.toUpperCase());
+    return !!(c && rede && c.networks.includes(rede));
+  };
+  const cnDe = async (a) => { if (!L.cn) return false; try { await trocas.cnAchar('', a, L.cn); return true; } catch { return false; } };
+  const thorRede = (id) => String(trocas.THOR_ATIVO[id] || '').split('.')[0];
+  const origem = {
+    sideshift: ssDe(A.asset), changenow: await cnDe(A.asset),
+    thorchain: !!trocas.THOR_ATIVO[A.asset.id] && trocas.THOR_ORIGEM.has(A.asset.id),
+    lifi: !!trocas.LIFI_CHAIN[A.net.id] && trocas.LIFI_ORIGEM.has(A.net.id)
+  };
+  const lista = [];
+  for (const b of ASSETS) {
+    if (b.id === A.asset.id) continue;
+    const servicos = [];
+    if (origem.sideshift && ssDe(b)) servicos.push({ nome: 'SideShift', estado: 'ok' });
+    if (origem.thorchain && trocas.THOR_ATIVO[b.id]) {
+      const pausada = L.thor && (L.thor.has(thorRede(A.asset.id)) || L.thor.has(thorRede(b.id)));
+      servicos.push({ nome: 'THORChain', estado: pausada ? 'pausado' : 'ok' });
+    }
+    if (origem.lifi && trocas.LIFI_CHAIN[b.network]) servicos.push({ nome: 'LI.FI', estado: 'ok' });
+    if (origem.changenow && await cnDe(b)) servicos.push({ nome: 'ChangeNOW', estado: temChaveCn ? 'ok' : 'chave' });
+    lista.push({ assetId: b.id, symbol: b.symbol, rede: NETWORKS[b.network].rotulo, servicos });
+  }
+  lista.sort((x, y) => (y.servicos.some((s) => s.estado === 'ok') - x.servicos.some((s) => s.estado === 'ok')) || x.symbol.localeCompare(y.symbol));
+  const avisos = [];
+  if (!L.ss) avisos.push('SideShift não respondeu' + (L.ssErro ? ': ' + L.ssErro.slice(0, 80) : ''));
+  if (!L.cn) avisos.push('ChangeNOW não respondeu' + (L.cnErro ? ': ' + L.cnErro.slice(0, 80) : ''));
+  if (!L.thor) avisos.push('THORChain não respondeu');
+  if (!temChaveCn) avisos.push('ChangeNOW aparece com 🔑: os pares existem, mas para cotar precisa colar a chave em Configurações → Chaves de API.');
+  return { de: `${A.asset.symbol} (${A.net.rotulo})`, origem, lista, avisos };
+});
+
 async function acompanharTrocaGenerica(consultar, idAtiv, textoPara) {
   const fim = Date.now() + 3 * 60 * 60 * 1000;
   let ultimo = '';
@@ -933,6 +1000,9 @@ handle('swapExecutarProvedor', async ({ provedor, dados, index, de, para, amount
     } else if (A.net.kind === 'evm') {
       if (!q.dados.router) throw new Error('A THORChain não informou o roteador desta rede.');
       hash = await evm.depositarThorchain({ net: A.net, url: cfgRede(A.net).rpc, wallet: keysFor(Number(index)).evm, asset: A.asset, router: q.dados.router, vault: q.dados.inbound, valor: raw, memo: q.dados.memo, expiry: q.dados.expiry });
+    } else if (A.net.kind === 'cosmos') {
+      const r = await MOD.cosmos().enviar({ cfg: cfgRede(A.net), asset: A.asset, chave: chaveRede(Number(index), A.net), to: q.dados.inbound, valorRaw: raw, memo: q.dados.memo });
+      hash = r.hash;
     } else throw new Error('Envio para a THORChain a partir desta rede ainda não é suportado.');
     const pagina = `https://thorchain.net/tx/${String(hash).replace(/^0x/, '')}`;
     const idAtiv = registrar({ ...base, paraValor: String(q.recebe), provedor: 'THORChain', status: 'aguardando a rede', explorer: pagina, hash });
@@ -1519,6 +1589,18 @@ app.whenReady().then(() => {
           await t('estimar ton', async () => c('estimate', { index: 0, assetId: 'ton', to: await dest2('ton'), amount: '0.1' }));
           await t('estimar sol->janio2', async () => c('estimate', { index: 0, assetId: 'sol', to: await dest2('sol'), amount: '0.01', velocidade: 'rapida' }));
           await t('estimar bonk', async () => c('estimate', { index: 0, assetId: 'bonk', to: await dest2('sol'), amount: '1' }));
+          for (const id of ['sui', 'apt', 'atom', 'dot', 'eth-arb', 'eth-base', 'eth-op']) await t('endereco ' + id, async () => (await c('receive', { index: 0, assetId: id })).address);
+          for (const id of ['sui', 'apt', 'atom', 'dot']) await t('estimar ' + id, async () => c('estimate', { index: 0, assetId: id, to: await dest2(id), amount: '0.001' }));
+          await t('estimar eth-base', () => c('estimate', { index: 0, assetId: 'eth-base', to: '0x000000000000000000000000000000000000dEaD', amount: '0.0001' }));
+          await t('estimar usdc-arb', () => c('estimate', { index: 0, assetId: 'usdc-arb', to: '0x000000000000000000000000000000000000dEaD', amount: '1' }));
+          await t('evm em aptos bloqueado', async () => (await c('verificarEndereco', { assetId: 'apt', endereco: '0x000000000000000000000000000000000000dEaD' })).estado);
+          await t('pares ton', async () => { const r = await c('swapPares', { assetId: 'ton' }); return r.lista.filter(x => x.servicos.length).length + ' pares; ex: ' + r.lista.slice(0, 4).map(x => x.symbol + '/' + x.rede + ':' + x.servicos.map(s => s.nome + '=' + s.estado).join('+')).join(' ; ') + ' avisos: ' + r.avisos.join(' | '); });
+          await t('pares atom', async () => { const r = await c('swapPares', { assetId: 'atom' }); return r.lista.filter(x => x.servicos.length).length + ' pares; origem ' + JSON.stringify(r.origem); });
+          await t('pares sui', async () => { const r = await c('swapPares', { assetId: 'sui' }); return r.lista.filter(x => x.servicos.length).length + ' pares; origem ' + JSON.stringify(r.origem); });
+          for (const [de, para, v] of [['usdc-base', 'sol', '50'], ['eth-arb', 'usdc-op', '0.02'], ['atom', 'btc', '40'], ['usdc-arb', 'sui', '50'], ['dot', 'usdt-tron', '50'], ['apt', 'eth', '80']]) {
+            await t('cotar ' + de + '->' + para, async () => { const r = await c('swapComparar', { index: 0, de, para, amount: v, destinoIndex: 1 }); return r.cotacoes.map(q => q.nome + '=' + q.recebe).join(' ; ') + ' | fora: ' + r.fora.map(f => f.nome + ':' + f.motivo.slice(0, 50)).join(' ; '); });
+          }
+          await t('tela pares', async () => { await abrirPares('ton'); await new Promise(r => setTimeout(r, 6000)); const n = document.querySelectorAll('#p-lista tbody tr').length; fecharModal(); return n + ' linhas'; });
           await t('assinar utxo', () => c('testeAssinar'));
           await t('favorito vinculado', async () => { await c('salvarContato', { nome: 'Corretora XRP', rede: 'xrp', endereco: 'rHsMGQEkVNJmpGWs8XUBoTBiAAbwxZN5v3', memo: '555', carteira: 0 }); return (await c('contatos', { rede: 'xrp' })).map(x => x.nome + ' tag ' + x.memo + ' carteira ' + x.carteira); });
           await t('dois favoritos mesmo endereco', async () => { await c('salvarContato', { novo: true, nome: 'Dest A', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 0 }); await c('salvarContato', { novo: true, nome: 'Dest B', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 1 }); return (await c('contatos', { rede: 'solana' })).map(x => x.nome); });

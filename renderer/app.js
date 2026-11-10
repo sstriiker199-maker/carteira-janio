@@ -681,11 +681,58 @@ async function resolverDestino(valor, assetId) {
 
 // ---------- Trocar (swap) ----------
 // reserva para a taxa quando o usuário clica em Máx numa moeda principal
-const RESERVA = { ETH: 0.0005, BNB: 0.0005, POL: 0.05, AVAX: 0.005, TRX: 2, BTC: 0.00005, LTC: 0.0005, DOGE: 2, BCH: 0.0002, SOL: 0.0001, XRP: 1.1, TON: 0.05, ADA: 0.5 };
+const RESERVA = { ETH: 0.0005, BNB: 0.0005, POL: 0.05, AVAX: 0.005, TRX: 2, BTC: 0.00005, LTC: 0.0005, DOGE: 2, BCH: 0.0002, SOL: 0.0001, XRP: 1.1, TON: 0.05, ADA: 0.5, SUI: 0.01, APT: 0.005, ATOM: 0.01, DOT: 0.03 };
 
-$('btn-trocar').onclick = () => {
+// 🔍 Pares aceitos: para qual moeda dá para trocar, e por qual serviço
+async function abrirPares(assetIdInicial, preDe, prePara) {
+  abrirModal(`
+    <h2>🔍 Pares aceitos no swap</h2>
+    <label>Trocar a partir de</label>
+    <select id="p-de">${opcoesMoedas(moedas, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)}`)}</select>
+    <input id="p-filtro" placeholder="Filtrar destino (ex.: USDT, Solana…)">
+    <div id="p-lista" class="cinza">Consultando os serviços…</div>
+    <div class="linha"><button id="p-voltar">Voltar para Trocar</button><button id="m-fechar" class="primario">Fechar</button></div>`);
+  $('m-fechar').onclick = fecharModal;
+  $('p-voltar').onclick = () => $('btn-trocar').onclick();
+  if (assetIdInicial) $('p-de').value = assetIdInicial;
+  let dados = null;
+  const ICONE = { ok: '✅', pausado: '⏸️', chave: '🔑' };
+  const DICA = { ok: 'aceita agora', pausado: 'pausada agora na THORChain', chave: 'precisa da chave da ChangeNOW' };
+  const desenhar = () => {
+    if (!dados) return;
+    const f = $('p-filtro').value.trim().toLowerCase();
+    const linhas = dados.lista.filter((x) => !f || (x.symbol + ' ' + x.rede).toLowerCase().includes(f));
+    const comServico = linhas.filter((x) => x.servicos.length);
+    const sem = linhas.filter((x) => !x.servicos.length);
+    const temSaldo = saldos[$('p-de').value] && !saldos[$('p-de').value].zero;
+    $('p-lista').className = '';
+    $('p-lista').innerHTML = `
+      <p>De <b>${esc(dados.de)}</b> dá para trocar por <b>${comServico.length}</b> moeda(s):</p>
+      <table class="cot"><thead><tr><th>Moeda</th><th>Serviços</th><th></th></tr></thead><tbody>
+      ${comServico.map((x) => `<tr>
+        <td><b>${esc(x.symbol)}</b><br><small class="cinza">${esc(x.rede)}</small></td>
+        <td>${x.servicos.map((s) => `<span class="tag" title="${esc(DICA[s.estado])}">${ICONE[s.estado]} ${esc(s.nome)}</span>`).join(' ')}</td>
+        <td>${temSaldo && x.servicos.some((s) => s.estado !== 'pausado') ? `<button data-usar="${esc(x.assetId)}">Usar</button>` : ''}</td></tr>`).join('')}
+      </tbody></table>
+      ${sem.length ? `<details class="ajuda"><summary>Sem nenhum serviço (${sem.length})</summary>${sem.map((x) => `<div>• ${esc(x.symbol)} — ${esc(x.rede)}</div>`).join('')}</details>` : ''}
+      <p class="sub">✅ aceita agora · ⏸️ pausada no momento · 🔑 precisa colar a chave da ChangeNOW. O valor mínimo de cada serviço aparece quando você compara cotações.${temSaldo ? '' : ' Esta carteira não tem saldo dessa moeda, então o botão "Usar" não aparece.'}</p>
+      ${dados.avisos.length ? `<div class="ajuda">${dados.avisos.map((a) => `<div>⚠️ ${esc(a)}</div>`).join('')}</div>` : ''}`;
+    for (const b of document.querySelectorAll('[data-usar]')) b.onclick = () => $('btn-trocar').onclick(null, $('p-de').value, b.dataset.usar);
+  };
+  const carregar = async () => {
+    dados = null;
+    $('p-lista').className = 'cinza';
+    $('p-lista').textContent = 'Consultando os serviços…';
+    try { dados = await rpc('swapPares', { assetId: $('p-de').value }); desenhar(); } catch (e) { $('p-lista').className = 'erro'; $('p-lista').textContent = e.message; }
+  };
+  $('p-de').onchange = carregar;
+  $('p-filtro').oninput = desenhar;
+  carregar();
+}
+
+$('btn-trocar').onclick = (ev, preDe, prePara) => {
   const comSaldo = moedas.filter((m) => saldos[m.id] && !saldos[m.id].zero && !saldos[m.id].erro && !saldos[m.id].indisponivel);
-  if (!comSaldo.length) { aviso('Esta carteira não tem saldo para trocar.'); return; }
+  if (!comSaldo.length) { abrirPares(null); aviso('Esta carteira não tem saldo para trocar. Veja abaixo quais pares cada moeda aceita.'); return; }
   const opDe = opcoesMoedas(comSaldo, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)} (saldo ${esc(saldos[m.id].balance)}${saldos[m.id].usd != null ? ' ≈ ' + esc(dolar(saldos[m.id].usd)) : ''})`);
   const opPara = opcoesMoedas(moedas, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)}`);
   abrirModal(`
@@ -693,7 +740,7 @@ $('btn-trocar').onclick = () => {
     <label>Você envia</label>
     <select id="s-de">${opDe}</select>
     <div class="campo-valor"><input id="s-valor" placeholder="Quantidade" inputmode="decimal"><button id="s-max">Máx</button></div>
-    <label>Você recebe</label>
+    <label>Você recebe <a href="#" id="s-pares" class="link-pequeno">🔍 Ver pares aceitos</a></label>
     <select id="s-para">${opPara}</select>
     <label>Receber na carteira</label>
     <select id="s-destino">${carteiras.map((c) => `<option value="${c.index}" ${c.index === atual ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
@@ -702,6 +749,9 @@ $('btn-trocar').onclick = () => {
     <div id="s-resumo"></div>
     <div class="linha" id="s-botoes"><button id="m-fechar">Cancelar</button><button id="s-cotar" class="primario">Comparar cotações</button></div>`);
   $('m-fechar').onclick = fecharModal;
+  if (preDe && comSaldo.some((m) => m.id === preDe)) $('s-de').value = preDe;
+  if (prePara) $('s-para').value = prePara;
+  $('s-pares').onclick = (e) => { e.preventDefault(); abrirPares($('s-de').value); };
   const limpar = () => { $('s-resumo').innerHTML = ''; $('m-erro').textContent = ''; const c = $('s-confirmar'); if (c) c.remove(); };
   for (const id of ['s-de', 's-para', 's-valor', 's-destino']) $(id).addEventListener('input', limpar);
   $('s-max').onclick = () => {
@@ -1073,7 +1123,13 @@ async function ligarExpress(lista) {
         botao.classList.add('perigo');
         botao.textContent = `Confirmar: ${d.qtdTxt} ${d.m.symbol}`;
         st.className = 'xp-st';
-        st.innerHTML = `<b>${esc(d.qtdTxt)} ${esc(d.m.symbol)}</b>${d.usd != null ? ' ≈ <b>' + esc(dolar(d.usd)) + '</b>' : ''}${esc(d.explic)} → ${esc(f.nome)}. Clique de novo em <b>Confirmar</b> para enviar (expira em 15 s).`;
+        const ad = String(f.endereco);
+        const adFmt = ad.length > 14 ? `<b class="xp-ponta">${esc(ad.slice(0, 6))}</b>${esc(ad.slice(6, -6))}<b class="xp-ponta">${esc(ad.slice(-6))}</b>` : `<b>${esc(ad)}</b>`;
+        const nomeOrigem = (carteiras.find((c) => c.index === origem()) || {}).name || '';
+        st.innerHTML = `<b>${esc(d.qtdTxt)} ${esc(d.m.symbol)}</b>${d.usd != null ? ' ≈ <b>' + esc(dolar(d.usd)) + '</b>' : ''}${esc(d.explic)}<br>
+          De: <b>${esc(nomeOrigem)}</b> → Para: <b>${esc(f.nome)}</b><br>
+          <span class="xp-end">${adFmt}</span>${f.memo ? `<br>Memo/tag: <b>${esc(f.memo)}</b>` : ''}<br>
+          Confira o endereço e clique de novo em <b>Confirmar</b> (expira em 15 s).`;
         setTimeout(() => { if (armado && armado.dados === d) { armado = null; reset(); st.textContent = 'Confirmação expirada.'; } }, 15000);
       };
     }

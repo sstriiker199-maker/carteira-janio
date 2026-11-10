@@ -2,7 +2,7 @@
   "name": "carteira-janio",
   "productName": "Wallet - Trabalho",
   "version": "0.4.1",
-  "description": "Carteira de criptomoedas com várias carteiras (Etapa 1: Ethereum, BNB Chain, Polygon, Avalanche, Tron)",
+  "description": "Carteira de criptomoedas com várias carteiras",
   "author": "Janio",
   "license": "UNLICENSED",
   "main": "main.js",
@@ -29,7 +29,15 @@
     "@ton/ton": "^15.1.0",
     "@ton/core": "^0.62.0",
     "@ton/crypto": "^3.3.0",
-    "@emurgo/cardano-serialization-lib-nodejs": "^12.1.1"
+    "@emurgo/cardano-serialization-lib-nodejs": "^12.1.1",
+    "@mysten/sui": "^2.39.1",
+    "@aptos-labs/ts-sdk": "^1.39.0",
+    "@cosmjs/stargate": "^0.33.1",
+    "@cosmjs/proto-signing": "^0.33.1",
+    "@cosmjs/encoding": "^0.33.1",
+    "@polkadot/api": "^16.4.0",
+    "@polkadot/keyring": "^14.0.1",
+    "@polkadot/util-crypto": "^14.0.1"
   },
   "devDependencies": {
     "electron": "^37.0.0",

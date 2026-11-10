@@ -32,10 +32,12 @@ const THOR_ATIVO = {
   'usdt-bsc': 'BSC.USDT-0X55D398326F99059FF775485246999027B3197955',
   'usdt-tron': 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T',
   'usdc-eth': 'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48',
-  'usdc-bsc': 'BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D'
+  'usdc-bsc': 'BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D',
+  atom: 'GAIA.ATOM', 'eth-base': 'BASE.ETH',
+  'usdc-base': 'BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913'
 };
 // de quais moedas o programa já sabe fazer o depósito na THORChain (com o "memo")
-const THOR_ORIGEM = new Set(['btc', 'ltc', 'doge', 'bch', 'eth', 'bnb', 'avax', 'usdt-eth', 'usdt-bsc', 'usdc-eth', 'usdc-bsc']);
+const THOR_ORIGEM = new Set(['btc', 'ltc', 'doge', 'bch', 'eth', 'bnb', 'avax', 'usdt-eth', 'usdt-bsc', 'usdc-eth', 'usdc-bsc', 'atom', 'eth-base', 'usdc-base']);
 
 function thorDestino(assetId, addr) {
   return assetId === 'bch' ? String(addr).replace(/^bitcoincash:/, '') : addr;
@@ -77,17 +79,20 @@ async function thorStatus(hash) {
 }
 
 // ---------------- LI.FI ----------------
-const LIFI_CHAIN = { ethereum: 1, bsc: 56, polygon: 137, avalanche: 43114, solana: 1151111081099710 };
+const LIFI_CHAIN = { ethereum: 1, bsc: 56, polygon: 137, avalanche: 43114, solana: 1151111081099710, arbitrum: 42161, base: 8453, optimism: 10, sui: 9270000000000000 };
+// redes de onde o programa sabe enviar pela LI.FI (Sui só como destino)
+const LIFI_ORIGEM = new Set(['ethereum', 'bsc', 'polygon', 'avalanche', 'solana', 'arbitrum', 'base', 'optimism']);
 const NATIVO_EVM = '0x0000000000000000000000000000000000000000';
 const NATIVO_SOL = '11111111111111111111111111111111';
 
 function lifiToken(asset) {
-  if (asset.native) return asset.network === 'solana' ? NATIVO_SOL : NATIVO_EVM;
+  if (asset.native) return asset.network === 'solana' ? NATIVO_SOL : asset.network === 'sui' ? '0x2::sui::SUI' : NATIVO_EVM;
   return asset.contract;
 }
 
 async function lifiCotar({ de, para, valorRaw, origem, destino, chave }) {
   if (!LIFI_CHAIN[de.network] || !LIFI_CHAIN[para.network]) throw new Error('par não disponível na LI.FI');
+  if (!LIFI_ORIGEM.has(de.network)) throw new Error(`envio de ${de.symbol} pela LI.FI ainda não suportado no programa`);
   const q = new URLSearchParams({
     fromChain: String(LIFI_CHAIN[de.network]), toChain: String(LIFI_CHAIN[para.network]),
     fromToken: lifiToken(de), toToken: lifiToken(para), fromAmount: String(valorRaw),
@@ -116,17 +121,19 @@ async function lifiStatus(hash, fromChain, toChain) {
 const CN_REDE = {
   ethereum: ['eth'], bsc: ['bsc'], polygon: ['matic', 'polygon', 'pol'], avalanche: ['avaxc', 'cchain', 'avax'],
   tron: ['trx', 'tron'], bitcoin: ['btc'], litecoin: ['ltc'], dogecoin: ['doge'], bitcoincash: ['bch'],
-  solana: ['sol'], xrp: ['xrp'], ton: ['ton'], cardano: ['ada', 'cardano']
+  solana: ['sol'], xrp: ['xrp'], ton: ['ton'], cardano: ['ada', 'cardano'],
+  arbitrum: ['arbitrum', 'arb'], base: ['base'], optimism: ['op', 'optimism'],
+  sui: ['sui'], aptos: ['apt', 'aptos'], cosmos: ['atom', 'cosmos'], polkadot: ['assethub', 'dot']
 };
 let cnMoedas = null;
 
 async function cnLista(chave) {
-  if (!cnMoedas) cnMoedas = await getJson(`${CHANGENOW}/exchange/currencies?active=true&flow=standard`, { headers: { 'x-changenow-api-key': chave } });
+  if (!cnMoedas) cnMoedas = await getJson(`${CHANGENOW}/exchange/currencies?active=true&flow=standard`, { headers: chave ? { 'x-changenow-api-key': chave } : {} });
   return cnMoedas;
 }
 
-async function cnAchar(chave, asset) {
-  const lista = await cnLista(chave);
+async function cnAchar(chave, asset, listaPronta) {
+  const lista = listaPronta || await cnLista(chave);
   const redes = CN_REDE[asset.network] || [];
   const sym = asset.symbol.toLowerCase();
   const c = lista.find((x) => x.ticker === sym && redes.includes(String(x.network).toLowerCase()))
@@ -161,4 +168,10 @@ async function cnStatus(chave, id) {
   return { status: mapa[j.status] || j.status, recebido: j.amountTo };
 }
 
-module.exports = { thorCotar, thorStatus, THOR_ATIVO, lifiCotar, lifiStatus, LIFI_CHAIN, cnCotar, cnCriar, cnStatus };
+// redes da THORChain paradas ou com negociação pausada agora
+async function thorPausadas() {
+  const l = await thorGet('/thorchain/inbound_addresses');
+  return new Set((l || []).filter((x) => x.halted || x.chain_trading_paused).map((x) => x.chain));
+}
+
+module.exports = { thorPausadas, cnAchar, thorCotar, thorStatus, THOR_ATIVO, THOR_ORIGEM, thorGet, lifiCotar, lifiStatus, LIFI_CHAIN, LIFI_ORIGEM, cnCotar, cnCriar, cnStatus, cnLista, CN_REDE };
