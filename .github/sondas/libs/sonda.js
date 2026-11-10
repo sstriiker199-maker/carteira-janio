@@ -8,7 +8,7 @@ function derivar(seed, caminho) {
   return Buffer.from(k);
 }
 (async () => {
-  const pj = require('@mysten/sui/package.json');
+  const pj = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'node_modules/@mysten/sui/package.json'), 'utf8'));
   log('sui versao', pj.version, pj.type, Object.keys(pj.exports || {}).join(' '));
   await t('sui require cjs', async () => { const g = require('@mysten/sui/grpc'); return Object.keys(g); });
   const imp = async (p) => { try { return require(p); } catch (e) { return import(p); } };
