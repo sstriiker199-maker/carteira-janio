@@ -50,12 +50,12 @@ async function preparar({ cfg, chave, to, amount, max, valorRaw }) {
   if (bal === 0n) throw new Error('Esta carteira não tem APT.');
   const preco = BigInt((await c.getGasPriceEstimation()).gas_estimate);
   // simula para saber o gás usado (enviar para conta nova gasta mais)
-  let usado = 1000n;
+  let usado = 2000n; // padrão seguro se a simulação não responder
   try {
     const tx = await montar(c, acc.accountAddress, dest, 1n, { max: 20000, preco: Number(preco) });
     const [sim] = await c.transaction.simulate.simple({ signerPublicKey: acc.publicKey, transaction: tx });
-    if (sim && sim.gas_used) usado = BigInt(sim.gas_used);
-  } catch { /* usa a estimativa */ }
+    if (sim && sim.success && Number(sim.gas_used) >= 5) usado = BigInt(sim.gas_used);
+  } catch { /* usa o padrão */ }
   const maxGas = (usado * 15n) / 10n + 50n;
   const feeMax = maxGas * preco;
   const value = valorRaw != null ? BigInt(valorRaw) : max ? bal - feeMax : parseAmount(amount, 8);

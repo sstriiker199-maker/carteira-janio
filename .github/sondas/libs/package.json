@@ -1,1 +1,0 @@
-{ "name": "sonda-libs", "private": true, "dependencies": { "@aptos-labs/ts-sdk": "^1.39.0" } }
