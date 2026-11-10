@@ -214,6 +214,7 @@ handle('unlock', ({ password }) => {
   const phrase = vault.decrypt(data.vault, password);
   const extras = data.extras ? JSON.parse(vault.decrypt(data.extras, password)) : { chaves: {}, frases: {} };
   session = { phrase, senha: password, extras };
+  try { carregarCache(); } catch { /* ok */ }
   return true;
 });
 
@@ -411,44 +412,87 @@ function avisarEntrada(w, assetId, diff, decimals) {
 
 const ultimaConsulta = {}; // "índice|moeda" -> horário
 
-async function verificarCarteira(w) {
-  const agora = Date.now();
-  const res = await mapLimit(ASSETS, 5, async (a) => {
-    const net = NETWORKS[a.network];
-    const chave = `${w.index}|${a.id}`;
-    const guardado = saldosMem[w.index] && saldosMem[w.index][a.id];
-    // redes lentas/limitadas (Bitcoin, TON, Cardano…) são consultadas com menos frequência
-    if (net.lento && guardado && agora - (ultimaConsulta[chave] || 0) < net.lento) {
-      return { assetId: a.id, raw: guardado.raw, decimals: guardado.decimals, repetido: true };
-    }
-    try {
-      const r = await fetchBalance(w.index, a.id);
-      ultimaConsulta[chave] = agora;
-      return { assetId: a.id, raw: r.raw, decimals: r.decimals };
-    } catch (e) {
-      if (e instanceof Indisponivel) return { assetId: a.id, indisponivel: e.message };
-      return { assetId: a.id, erro: friendly(e) };
-    }
-  });
-  const lista = [];
-  for (const r of res) {
-    if (r.indisponivel) { lista.push({ assetId: r.assetId, indisponivel: r.indisponivel, zero: true }); continue; }
-    if (r.erro) { lista.push({ assetId: r.assetId, erro: r.erro }); continue; }
-    const k = `${w.index}|${r.assetId}`;
-    const antes = ultimos[k] != null ? BigInt(ultimos[k]) : null;
-    if (antes != null && r.raw > antes) avisarEntrada(w, r.assetId, r.raw - antes, r.decimals);
-    ultimos[k] = r.raw.toString();
-    (saldosMem[w.index] = saldosMem[w.index] || {})[r.assetId] = { raw: r.raw, decimals: r.decimals };
-    const sym = getAsset(r.assetId).asset.symbol;
-    const usd = valorUsd(r.assetId, r.raw, r.decimals);
-    const v = precos.variacao(sym);
-    lista.push({
-      assetId: r.assetId, balance: fmt(r.raw, r.decimals), zero: r.raw === 0n, usd,
-      preco: precos.preco(sym), var24h: v,
-      ganho24h: usd != null && v != null ? usd * v / (100 + v) : null
-    });
+const emVerificacao = new Set();
+const cacheFile = () => path.join(dataDir(), 'saldos-cache.json');
+
+function formatarSaldo(assetId, raw, decimals) {
+  const sym = getAsset(assetId).asset.symbol;
+  const usd = valorUsd(assetId, raw, decimals);
+  const v = precos.variacao(sym);
+  return {
+    assetId, balance: fmt(raw, decimals), zero: raw === 0n, usd,
+    preco: precos.preco(sym), var24h: v,
+    ganho24h: usd != null && v != null ? usd * v / (100 + v) : null
+  };
+}
+
+function enviarSaldos(index, lista) {
+  if (lista.length && win && !win.isDestroyed()) win.webContents.send('saldos', { index, saldos: lista, quando: Date.now() });
+}
+
+// Saldos guardados (aparecem na hora ao abrir a carteira, antes de consultar as redes)
+handle('saldosGuardados', ({ index }) => {
+  const m = saldosMem[Number(index)] || {};
+  return Object.entries(m).map(([assetId, v]) => formatarSaldo(assetId, v.raw, v.decimals));
+});
+
+function salvarCache() {
+  const out = {};
+  for (const [i, m] of Object.entries(saldosMem)) {
+    out[i] = {};
+    for (const [a, v] of Object.entries(m)) out[i][a] = { raw: v.raw.toString(), decimals: v.decimals };
   }
-  if (win && !win.isDestroyed()) win.webContents.send('saldos', { index: w.index, saldos: lista, quando: Date.now() });
+  try { fs.writeFileSync(cacheFile(), JSON.stringify(out)); } catch { /* ignora */ }
+}
+
+function carregarCache() {
+  const c = readJson(cacheFile()) || {};
+  for (const [i, m] of Object.entries(c)) {
+    saldosMem[i] = saldosMem[i] || {};
+    for (const [a, v] of Object.entries(m)) if (!saldosMem[i][a]) saldosMem[i][a] = { raw: BigInt(v.raw), decimals: v.decimals };
+  }
+}
+
+const comTempo = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('A rede demorou para responder.')), ms))]);
+
+async function verificarCarteira(w, rapido) {
+  if (emVerificacao.has(w.index)) return;
+  emVerificacao.add(w.index);
+  try {
+    const agora = Date.now();
+    let pendentes = [];
+    let timer = null;
+    const despejar = () => { clearTimeout(timer); timer = null; const l = pendentes; pendentes = []; enviarSaldos(w.index, l); };
+    const publicar = (item) => { pendentes.push(item); if (!timer) timer = setTimeout(despejar, 150); };
+
+    await mapLimit(ASSETS, rapido ? 10 : 5, async (a) => {
+      const net = NETWORKS[a.network];
+      const chave = `${w.index}|${a.id}`;
+      const guardado = saldosMem[w.index] && saldosMem[w.index][a.id];
+      // redes lentas/limitadas (Bitcoin, TON, Cardano…) são consultadas com menos frequência
+      if (net.lento && guardado && agora - (ultimaConsulta[chave] || 0) < net.lento) {
+        publicar(formatarSaldo(a.id, guardado.raw, guardado.decimals));
+        return;
+      }
+      let r;
+      try {
+        r = await comTempo(fetchBalance(w.index, a.id), 15000);
+        ultimaConsulta[chave] = agora;
+      } catch (e) {
+        if (e instanceof Indisponivel) { publicar({ assetId: a.id, indisponivel: e.message, zero: true }); return; }
+        publicar({ assetId: a.id, erro: friendly(e) });
+        return;
+      }
+      const antes = ultimos[chave] != null ? BigInt(ultimos[chave]) : null;
+      if (antes != null && r.raw > antes) avisarEntrada(w, a.id, r.raw - antes, r.decimals);
+      ultimos[chave] = r.raw.toString();
+      (saldosMem[w.index] = saldosMem[w.index] || {})[a.id] = { raw: r.raw, decimals: r.decimals };
+      publicar(formatarSaldo(a.id, r.raw, r.decimals));
+    });
+    despejar();
+  } finally {
+    emVerificacao.delete(w.index);
+  }
 }
 
 async function cicloMonitor() {
@@ -457,7 +501,7 @@ async function cicloMonitor() {
   rodando = true;
   try {
     if (session) {
-      if (!ultimos) ultimos = readJson(saldosFile()) || {};
+      if (!ultimos) { ultimos = readJson(saldosFile()) || {}; carregarCache(); }
       const data = readJson(dataFile());
       const agora = Date.now();
       // carteira aberta: sempre. As outras: em rodízio, algumas por ciclo (aguenta centenas de carteiras)
@@ -472,8 +516,9 @@ async function cicloMonitor() {
       const focada = data.wallets.find((w) => w.index === foco);
       const lista = [...new Set((focada ? [focada] : []).concat(lote))];
       await precos.atualizar().catch((e) => log('[preços] ' + e.message));
-      for (const w of lista) { await verificarCarteira(w); enviarResumo(); }
+      for (const w of lista) { await verificarCarteira(w, w.index === foco); enviarResumo(); }
       fs.writeFileSync(saldosFile(), JSON.stringify(ultimos));
+      salvarCache();
     }
   } catch (e) {
     log('[monitor] ' + (e && e.message));
@@ -483,7 +528,13 @@ async function cicloMonitor() {
   timerMonitor = setTimeout(cicloMonitor, settings().intervalo * 1000);
 }
 
-handle('monitorFoco', ({ index }) => { foco = Number(index); cicloMonitor(); return true; });
+handle('monitorFoco', ({ index }) => {
+  foco = Number(index);
+  // a carteira aberta "fura a fila": consulta já, em paralelo com o rodízio
+  const w = (readJson(dataFile()) || { wallets: [] }).wallets.find((x) => x.index === foco);
+  if (w && session) verificarCarteira(w, true).then(enviarResumo).catch(() => {});
+  return true;
+});
 handle('monitorAgora', () => { cicloMonitor(); return true; });
 handle('resumo', () => resumo());
 
@@ -1030,7 +1081,10 @@ app.whenReady().then(() => {
           await t('endereco errado', () => c('estimate', { index: 0, assetId: 'usdt-bsc', to: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', amount: '1' }));
           await t('config', async () => (await c('getSettings')).intervalo);
           await abrirPrincipal();
-          await new Promise(r => setTimeout(r, 12000));
+          const cheios = (ms) => new Promise(r => setTimeout(() => r([...document.querySelectorAll('[data-saldo]')].filter(x => !/carregando/.test(x.textContent)).length), ms));
+          out.push('preenchidos em 1s: ' + await cheios(1000) + ' / 19');
+          out.push('preenchidos em 3s: ' + await cheios(2000) + ' / 19');
+          await new Promise(r => setTimeout(r, 9000));
           out.push('linhas ' + document.querySelectorAll('#tabela-moedas tr[data-grupo]').length);
           out.push('seletores ' + [...document.querySelectorAll('.sel-rede')].map(x => x.dataset.rede + ':' + x.options.length).join(' '));
           out.push('icones ' + [...document.querySelectorAll('img.icone')].filter(i => i.naturalWidth > 0).map(i => i.dataset.icone).join(','));

@@ -147,6 +147,12 @@ function selecionar(index) {
   $('hora-saldo').textContent = '';
   mostrarTotais();
   desenharTabela();
+  // mostra na hora o último saldo conhecido, depois atualiza
+  rpc('saldosGuardados', { index }).then((l) => {
+    if (atual !== index) return;
+    for (const x of l) if (!saldos[x.assetId]) saldos[x.assetId] = x;
+    atualizarCelulas();
+  }).catch(() => {});
   rpc('monitorFoco', { index }).catch(() => {});
 }
 
