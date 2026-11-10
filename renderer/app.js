@@ -116,6 +116,7 @@ $('senha-entrar').onkeydown = (e) => { if (e.key === 'Enter') entrar(); };
 async function abrirPrincipal() {
   mostrar('tela-principal');
   moedas = await rpc('assets');
+  await carregarFavMoedas();
   await carregarCarteiras();
   if (atual == null || !carteiras.some((c) => c.index === atual)) atual = carteiras[0].index;
   selecionar(atual);
@@ -637,6 +638,20 @@ function enviar(assetId) {
   }
 }
 
+// ---------- Moedas favoritas ----------
+let favMoedas = [];
+async function carregarFavMoedas() {
+  try { favMoedas = await rpc('moedasFavoritas'); } catch { favMoedas = []; }
+}
+// <option>s de moedas com as favoritas primeiro (⭐), na ordem marcada
+function opcoesMoedas(lista, rotulo) {
+  const fav = favMoedas.map((id) => lista.find((m) => m.id === id)).filter(Boolean);
+  const resto = lista.filter((m) => !favMoedas.includes(m.id));
+  const op = (m) => `<option value="${m.id}">${rotulo(m)}</option>`;
+  return (fav.length ? `<optgroup label="⭐ Favoritas">${fav.map((m) => op(m).replace('">', '">⭐ ')).join('')}</optgroup><optgroup label="Todas">` : '')
+    + resto.map(op).join('') + (fav.length ? '</optgroup>' : '');
+}
+
 // ---------- Destinos: minhas carteiras + favoritos ----------
 async function opcoesDestino(assetId, excluirIndex) {
   const m = moedas.find((x) => x.id === assetId);
@@ -663,8 +678,8 @@ const RESERVA = { ETH: 0.0005, BNB: 0.0005, POL: 0.05, AVAX: 0.005, TRX: 2, BTC:
 $('btn-trocar').onclick = () => {
   const comSaldo = moedas.filter((m) => saldos[m.id] && !saldos[m.id].zero && !saldos[m.id].erro && !saldos[m.id].indisponivel);
   if (!comSaldo.length) { aviso('Esta carteira não tem saldo para trocar.'); return; }
-  const opDe = comSaldo.map((m) => `<option value="${m.id}">${esc(m.symbol)} — ${esc(m.rotulo)} (saldo ${esc(saldos[m.id].balance)})</option>`).join('');
-  const opPara = moedas.map((m) => `<option value="${m.id}">${esc(m.symbol)} — ${esc(m.rotulo)}</option>`).join('');
+  const opDe = opcoesMoedas(comSaldo, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)} (saldo ${esc(saldos[m.id].balance)})`);
+  const opPara = opcoesMoedas(moedas, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)}`);
   abrirModal(`
     <h2>🔄 Trocar moedas</h2>
     <label>Você envia</label>
@@ -749,6 +764,12 @@ $('btn-contatos').onclick = async () => {
       <button id="nf-salvar" class="primario">⭐ Salvar favorito</button> <span id="nf-res" class="cinza"></span>
     </div>
     <div class="secao">
+      <h3>⭐ Moedas favoritas</h3>
+      <p class="ajuda">As moedas marcadas aparecem primeiro (na ordem em que você marcar) no Envios múltiplos e no Trocar.</p>
+      <div class="chips">${moedas.map((m) => `<label class="chip"><input type="checkbox" class="fm" value="${m.id}" ${favMoedas.includes(m.id) ? 'checked' : ''}> ${esc(m.symbol)} <span class="cinza">${esc(m.rotulo)}</span></label>`).join('')}</div>
+      <span id="fm-res" class="cinza"></span>
+    </div>
+    <div class="secao">
       <h3>Meus favoritos</h3>
       ${lista.length ? `<table><thead><tr><th>Nome</th><th>Rede</th><th>Endereço</th><th>Vinculado a</th><th></th></tr></thead><tbody>
         ${lista.map((c, i) => `<tr><td><input data-fnome="${i}" value="${esc(c.nome)}"></td><td><span class="tag">${esc(c.rotuloRede || c.rede)}</span></td>
@@ -761,6 +782,13 @@ $('btn-contatos').onclick = async () => {
   $('modal').classList.add('largo');
   $('m-fechar').onclick = () => { $('modal').classList.remove('largo'); fecharModal(); };
 
+  for (const cb of document.querySelectorAll('.fm')) {
+    cb.onchange = async () => {
+      if (cb.checked) { if (!favMoedas.includes(cb.value)) favMoedas.push(cb.value); } else favMoedas = favMoedas.filter((x) => x !== cb.value);
+      favMoedas = await rpc('salvarMoedasFavoritas', { ids: favMoedas });
+      $('fm-res').textContent = favMoedas.length ? 'Ordem: ' + favMoedas.map((id) => moedas.find((m) => m.id === id).symbol + ' (' + moedas.find((m) => m.id === id).rotulo + ')').join(' → ') : '';
+    };
+  }
   const redeSel = () => redes.find((r) => r.id === $('nf-rede').value);
   const ajustarMemo = () => {
     const r = redeSel();
@@ -810,7 +838,7 @@ $('btn-multiplos').onclick = () => {
   abrirModal(`
     <h2>📤 Envios múltiplos</h2>
     <div class="linha filtros">
-      <select id="mm-moeda">${moedas.map((m) => `<option value="${m.id}">${esc(m.symbol)} — ${esc(m.rotulo)}</option>`).join('')}</select>
+      <select id="mm-moeda">${opcoesMoedas(moedas, (m) => `${esc(m.symbol)} — ${esc(m.rotulo)}`)}</select>
       <label class="inline">Carteiras com mais de US$ <input id="mm-min" type="number" min="0" value="0" class="curto"></label>
       <button id="mm-buscar" class="primario">Mostrar carteiras</button>
     </div>

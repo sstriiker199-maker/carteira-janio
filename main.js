@@ -798,6 +798,15 @@ handle('salvarContato', ({ id, nome, rede, endereco, memo, carteira }) => {
 });
 handle('redes', () => Object.values(NETWORKS).map((n) => ({ id: n.id, rotulo: n.rotulo, memo: n.memo || null, assetId: ASSETS.find((a) => a.network === n.id).id })));
 
+// Moedas favoritas (aparecem primeiro nas listas de moedas)
+handle('moedasFavoritas', () => (readJson(cfgFile()) || {}).moedasFavoritas || []);
+handle('salvarMoedasFavoritas', ({ ids }) => {
+  const atual = readJson(cfgFile()) || {};
+  atual.moedasFavoritas = (ids || []).filter((id) => ASSETS.some((a) => a.id === id));
+  writeJson(cfgFile(), atual);
+  return atual.moedasFavoritas;
+});
+
 handle('apagarContato', ({ id }) => {
   writeJson(contatosFile(), (readJson(contatosFile()) || []).filter((c) => c.id !== id));
   return true;
@@ -1293,6 +1302,8 @@ app.whenReady().then(() => {
           await t('receber ton com memo', async () => (await c('receive', { index: 0, assetId: 'ton' })).memo);
           await t('remover grupo', async () => { const ws = await c('wallets'); const g = ws.find(w => w.name === 'Outra 1').grupo; const ids = ws.filter(w => w.grupo === g).map(w => w.index); const n = await c('removerCarteiras', { indices: ids, password: 'teste12345' }); return n + ' removidas, restam ' + (await c('wallets')).length; });
           await t('remover senha errada', () => c('removerCarteiras', { indices: [1], password: 'errada' }));
+          await t('moedas favoritas', async () => { await c('salvarMoedasFavoritas', { ids: ['usdt-tron', 'sol', 'xrp'] }); return c('moedasFavoritas'); });
+          await t('multiplos ordem', async () => { await carregarFavMoedas(); document.getElementById('btn-multiplos').click(); await new Promise(r => setTimeout(r, 300)); const o = [...document.getElementById('mm-moeda').options].slice(0, 4).map(x => x.textContent); fecharModal(); return o; });
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
