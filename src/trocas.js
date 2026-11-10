@@ -49,7 +49,12 @@ async function thorCotar({ de, para, valorRaw, decimaisDe, destino }) {
     from_asset: THOR_ATIVO[de.id], to_asset: THOR_ATIVO[para.id], amount: amount8.toString(),
     destination: thorDestino(para.id, destino), streaming_interval: '1', streaming_quantity: '0'
   });
-  const j = await thorGet(`/thorchain/quote/swap?${q}`);
+  let j;
+  try { j = await thorGet(`/thorchain/quote/swap?${q}`); } catch (e) {
+    if (/trading|halt/i.test(e.message)) throw new Error('negociação pausada na THORChain para esse par agora');
+    if (/not enough asset to pay for fees|less than|dust/i.test(e.message)) throw new Error('valor pequeno demais para a THORChain');
+    throw e;
+  }
   if (!j.memo || !j.inbound_address) throw new Error(j.message || 'cotação incompleta');
   return {
     recebe: Number(j.expected_amount_out) / 1e8,
