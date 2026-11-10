@@ -262,7 +262,13 @@ handle('lock', () => {
 handle('wallets', () => {
   requireUnlocked();
   const data = readJson(dataFile());
-  return data.wallets.map((w) => ({ name: w.name, index: w.index, importada: !!w.origem, grupo: w.origem === 'frase' ? w.grupo : null, evmAddress: keysFor(w.index).evm.address, tronAddress: keysFor(w.index).tronAddress }));
+  // grupos antigos com a mesma frase contam como um só
+  const canonico = {};
+  for (const [g, f] of Object.entries(session.extras.frases)) {
+    const primeiro = Object.entries(session.extras.frases).find(([, f2]) => f2 === f)[0];
+    canonico[g] = primeiro;
+  }
+  return data.wallets.map((w) => ({ name: w.name, index: w.index, importada: !!w.origem, grupo: w.origem === 'frase' ? canonico[w.grupo] || w.grupo : null, evmAddress: keysFor(w.index).evm.address, tronAddress: keysFor(w.index).tronAddress }));
 });
 
 handle('addWallet', ({ name }) => {
@@ -304,7 +310,9 @@ handle('importWallet', ({ tipo, segredo, name, quantidade }) => {
     if (!Mnemonic.isValidMnemonic(frase)) throw new Error('Frase inválida. Confira as palavras e a ordem.');
     if (frase === session.phrase) throw new Error('Essa é a frase principal deste programa. Use "+ Nova carteira".');
     const qtd = Math.min(200, Math.max(1, Number(quantidade) || 1));
-    const grupo = 'g' + Date.now();
+    // mesma frase = mesmo grupo (mesmo se importar em várias vezes)
+    const existente = Object.entries(session.extras.frases).find(([, f]) => f === frase);
+    const grupo = existente ? existente[0] : 'g' + Date.now();
     session.extras.frases[grupo] = frase;
     const m = Mnemonic.fromPhrase(frase);
     for (let i = 0; i < qtd; i++) {
