@@ -238,10 +238,10 @@ function desenharTabela() {
   const gs = grupos();
   $('tabela-moedas').innerHTML = gs.map((g) => `
     <tr data-grupo="${esc(g.symbol)}">
-      <td class="nome-moeda">
+      <td><div class="nome-moeda">
         <img class="icone" data-icone="${esc(g.symbol)}" src="icons/${esc((ICONES[g.symbol] || g.symbol).toLowerCase())}.svg" alt="">
         <b>${esc(g.symbol)}</b><span>${esc(g.name)}</span>
-      </td>
+      </div></td>
       <td class="saldo"><div data-saldo="${esc(g.symbol)}"></div><div class="usd" data-usd="${esc(g.symbol)}"></div></td>
       <td class="saldo"><div data-preco="${esc(g.symbol)}"></div><div class="usd" data-var="${esc(g.symbol)}"></div></td>
       <td class="saldo hoje" data-hoje="${esc(g.symbol)}"></td>

@@ -524,10 +524,14 @@ function salvarCache() {
 
 function carregarCache() {
   const c = readJson(cacheFile()) || {};
+  const existe = new Set(ASSETS.map((x) => x.id));
   for (const [i, m] of Object.entries(c)) {
     saldosMem[i] = saldosMem[i] || {};
-    for (const [a, v] of Object.entries(m)) if (!saldosMem[i][a]) saldosMem[i][a] = { raw: BigInt(v.raw), decimals: v.decimals };
+    for (const [a, v] of Object.entries(m)) if (existe.has(a) && !saldosMem[i][a]) saldosMem[i][a] = { raw: BigInt(v.raw), decimals: v.decimals };
   }
+  // saldos guardados de moedas que saíram do programa: descarta (senão a atualização trava)
+  for (const m of Object.values(saldosMem)) for (const a of Object.keys(m)) if (!existe.has(a)) delete m[a];
+  if (ultimos) for (const k of Object.keys(ultimos)) if (!existe.has(k.split('|')[1])) delete ultimos[k];
 }
 
 const comTempo = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('A rede demorou para responder.')), ms))]);
