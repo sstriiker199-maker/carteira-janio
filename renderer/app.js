@@ -1044,7 +1044,7 @@ async function carregarAtividade() {
   if (!$('at-lista')) return;
   const lista = await rpc('atividade', { index: $('at-carteira').value, tipo: $('at-tipo').value });
   if (!lista.length) { $('at-lista').textContent = 'Nada por aqui ainda.'; return; }
-  const ICON = { enviado: '↗️', recebido: '↘️', taxa: '⛽', importada: '📥', swap: '🔄' };
+  const ICON = { enviado: '↗️', recebido: '↘️', taxa: '⛽', importada: '📥', swap: '🔄', removida: '🗑' };
   const STATUS = { processando: '⏳ processando', confirmado: '✅ confirmado', falhou: '❌ falhou', pendente: '⏳ ainda não confirmado' };
   $('at-lista').classList.remove('cinza');
   $('at-lista').innerHTML = lista.map((e, i) => {
@@ -1063,6 +1063,8 @@ async function carregarAtividade() {
     } else if (e.tipo === 'taxa') {
       titulo = `Taxa abastecida: ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
       detalhe = `De <b>${esc(e.carteira)}</b> para <b>${esc(e.destino)}</b> · rede ${esc(e.rede)}`;
+    } else if (e.tipo === 'removida') {
+      titulo = `Removida do programa: ${esc(e.carteira)}`;
     } else {
       titulo = `Carteira importada: ${esc(e.carteira)}`;
     }
@@ -1150,6 +1152,48 @@ $('btn-exportar').onclick = () => pedirSenha(`Exportar chave – ${carteiraAtual
     return `<label>Chave Ethereum / BNB / Polygon / Avalanche</label><div class="end-grande"><code>${esc(k.evm)}</code></div>
             <label>Chave Tron</label><div class="end-grande"><code>${esc(k.tron)}</code></div>`;
   });
+
+$('btn-remover').onclick = () => {
+  const c = carteiraAtual();
+  const doGrupo = c.grupo ? carteiras.filter((x) => x.grupo === c.grupo) : [];
+  const totalGrupo = doGrupo.reduce((a, x) => a + (totais[x.index] || 0), 0);
+  const nomeGrupo = doGrupo.length ? doGrupo[0].name.replace(/\s*\d+$/, '') : '';
+  abrirModal(`
+    <h2>🗑 Remover carteira</h2>
+    <p class="alerta">Remover tira a carteira <b>só deste programa</b>. O dinheiro continua na blockchain: dá para trazer de volta importando a mesma frase/chave de novo.</p>
+    ${doGrupo.length > 1 ? `
+      <label class="check"><input type="radio" name="rm" value="uma" checked> Só esta carteira: <b>${esc(c.name)}</b> ${totais[c.index] ? '(' + esc(dolar(totais[c.index])) + ')' : ''}</label>
+      <label class="check"><input type="radio" name="rm" value="grupo"> Todas as <b>${doGrupo.length}</b> carteiras do grupo importado "<b>${esc(nomeGrupo)}</b>" ${totalGrupo ? '(' + esc(dolar(totalGrupo)) + ' no total)' : ''}</label>
+      <p class="ajuda">As outras carteiras (suas e de outros grupos) não são tocadas.</p>`
+    : `<p>Carteira: <b>${esc(c.name)}</b> ${totais[c.index] ? '(' + esc(dolar(totais[c.index])) + ')' : ''}</p>`}
+    <div id="rm-aviso"></div>
+    <label>Sua senha</label>
+    <input id="rm-senha" type="password">
+    <p id="m-erro" class="erro"></p>
+    <div class="linha"><button id="m-fechar">Cancelar</button><button id="rm-ok" class="perigo">Remover</button></div>`);
+  $('m-fechar').onclick = fecharModal;
+  const alvo = () => (document.querySelector('input[name="rm"]:checked') || {}).value === 'grupo' ? doGrupo : [c];
+  const avisar = () => {
+    const comSaldo = alvo().filter((x) => (totais[x.index] || 0) >= 0.01);
+    $('rm-aviso').innerHTML = comSaldo.length
+      ? `<p class="alerta-rede">⚠️ ${comSaldo.length === 1 ? 'Esta carteira ainda tem' : comSaldo.length + ' dessas carteiras ainda têm'} saldo (${esc(dolar(comSaldo.reduce((a, x) => a + (totais[x.index] || 0), 0)))}). Se quiser, use antes o <b>Juntar saldos</b>.</p>`
+      : '';
+    $('rm-ok').textContent = alvo().length > 1 ? `Remover ${alvo().length} carteiras` : 'Remover';
+  };
+  for (const r of document.querySelectorAll('input[name="rm"]')) r.onchange = avisar;
+  avisar();
+  $('rm-ok').onclick = async () => {
+    $('rm-ok').disabled = true;
+    try {
+      const n = await rpc('removerCarteiras', { indices: alvo().map((x) => x.index), password: $('rm-senha').value });
+      fecharModal();
+      atual = null;
+      await carregarCarteiras();
+      selecionar(carteiras[0].index);
+      aviso(n > 1 ? `${n} carteiras removidas` : 'Carteira removida');
+    } catch (e) { $('m-erro').textContent = e.message; $('rm-ok').disabled = false; }
+  };
+};
 
 $('btn-bloquear').onclick = async () => {
   await rpc('lock');

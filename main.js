@@ -262,7 +262,7 @@ handle('lock', () => {
 handle('wallets', () => {
   requireUnlocked();
   const data = readJson(dataFile());
-  return data.wallets.map((w) => ({ name: w.name, index: w.index, importada: !!w.origem, evmAddress: keysFor(w.index).evm.address, tronAddress: keysFor(w.index).tronAddress }));
+  return data.wallets.map((w) => ({ name: w.name, index: w.index, importada: !!w.origem, grupo: w.origem === 'frase' ? w.grupo : null, evmAddress: keysFor(w.index).evm.address, tronAddress: keysFor(w.index).tronAddress }));
 });
 
 handle('addWallet', ({ name }) => {
@@ -322,6 +322,37 @@ handle('importWallet', ({ tipo, segredo, name, quantidade }) => {
   rodizio = Math.max(0, data.wallets.length - novas.length - 1);
   cicloMonitor();
   return novas;
+});
+
+// Remover carteiras do programa (o dinheiro continua na blockchain)
+handle('removerCarteiras', ({ indices, password }) => {
+  requireUnlocked();
+  const data = readJson(dataFile());
+  vault.decrypt(data.vault, password); // confere a senha
+  const tirar = new Set((indices || []).map(Number));
+  if (!tirar.size) throw new Error('Nenhuma carteira escolhida.');
+  if (data.wallets.length - [...tirar].filter((i) => data.wallets.some((w) => w.index === i)).length < 1) {
+    throw new Error('Precisa ficar pelo menos uma carteira no programa.');
+  }
+  const removidas = data.wallets.filter((w) => tirar.has(w.index));
+  data.wallets = data.wallets.filter((w) => !tirar.has(w.index));
+  // apaga chaves/frases importadas que não são mais usadas
+  for (const w of removidas) {
+    if (w.origem === 'chave') delete session.extras.chaves[w.chave];
+    if (w.origem === 'frase' && !data.wallets.some((x) => x.grupo === w.grupo)) delete session.extras.frases[w.grupo];
+    delete keyCache[w.index];
+    delete saldosMem[w.index];
+  }
+  salvarExtras(data);
+  writeJson(dataFile(), data);
+  if (ultimos) for (const k of Object.keys(ultimos)) if (tirar.has(Number(k.split('|')[0]))) delete ultimos[k];
+  try { salvarCache(); } catch { /* ok */ }
+  const cfg = readJson(cfgFile()) || {};
+  if (cfg.carteiraTaxas != null && tirar.has(Number(cfg.carteiraTaxas))) { cfg.carteiraTaxas = null; writeJson(cfgFile(), cfg); }
+  if (tirar.has(foco)) foco = null;
+  rodizio = 0;
+  registrar({ tipo: 'removida', carteira: removidas.length === 1 ? removidas[0].name : `${removidas.length} carteiras` });
+  return removidas.length;
 });
 
 handle('renameWallet', ({ index, name }) => {
@@ -1260,6 +1291,8 @@ app.whenReady().then(() => {
           await t('salvar chave falsa e ver reserva', async () => { await c('saveSettings', { rpc: {}, tronApiKey: '', intervalo: 3, notificar: {}, email: {}, carteiraTaxas: '', chaves: { alchemy: 'chave-falsa', helius: 'chave-falsa', toncenter: '' } }); return [await c('balance', { index: 0, assetId: 'usdt-bsc' }), await c('balance', { index: 0, assetId: 'sol' })]; });
           await t('receber xrp com tag', async () => { const r = await c('receive', { index: 0, assetId: 'xrp' }); return r.address + ' tag ' + JSON.stringify(r.memo); });
           await t('receber ton com memo', async () => (await c('receive', { index: 0, assetId: 'ton' })).memo);
+          await t('remover grupo', async () => { const ws = await c('wallets'); const g = ws.find(w => w.name === 'Outra 1').grupo; const ids = ws.filter(w => w.grupo === g).map(w => w.index); const n = await c('removerCarteiras', { indices: ids, password: 'teste12345' }); return n + ' removidas, restam ' + (await c('wallets')).length; });
+          await t('remover senha errada', () => c('removerCarteiras', { indices: [1], password: 'errada' }));
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
