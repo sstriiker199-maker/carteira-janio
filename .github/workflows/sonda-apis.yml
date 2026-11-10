@@ -16,5 +16,5 @@ jobs:
         shell: bash
         working-directory: .github/sondas/apis
         run: |
-          bash sonda.sh 2>&1 | sed 's/^/EDGE| /'
+          npm install --no-audit --no-fund > npm.log 2>&1 || tail -20 npm.log
           timeout 200 node sonda.js 2>&1 || true
