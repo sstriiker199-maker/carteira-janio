@@ -146,3 +146,6 @@ table.multi input, table.multi select { margin-bottom: 4px; padding: 6px 8px; }
 .verif.atencao { color: #fbbf24; }
 .verif.bloqueado { color: #f87171; }
 .mm-status.verif { margin: 0; }
+
+td.saldo.hoje { font-weight: 600; white-space: nowrap; }
+td.saldo .usd { white-space: nowrap; }

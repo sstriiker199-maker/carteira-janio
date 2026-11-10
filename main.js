@@ -1181,6 +1181,8 @@ app.whenReady().then(() => {
           out.push('letras ' + [...document.querySelectorAll('.icone.letra')].map(i => i.textContent).join(','));
           out.push('saldos ' + [...document.querySelectorAll('[data-saldo]')].map(x => x.dataset.saldo + '=' + x.textContent).join(' | '));
           out.push('hora ' + document.getElementById('hora-saldo').textContent);
+          out.push('linha SOL ' + [...document.querySelector('tr[data-grupo="SOL"]').querySelectorAll('td')].map(td => td.textContent.replace(/\\s+/g, ' ').trim()).join(' | '));
+          out.push('cabecalho ' + [...document.querySelectorAll('thead th')].map(t => t.textContent).join(' | '));
           out.push('resumo ' + JSON.stringify(await c('resumo')));
           out.push('busca usdt ' + JSON.stringify(await c('buscarMoeda', { texto: 'usdt' })));
           out.push('lista lateral ' + [...document.querySelectorAll('#lista-carteiras li')].map(li => li.textContent.replace(/\\s+/g, ' ').trim()).join(' / '));

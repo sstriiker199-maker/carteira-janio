@@ -206,13 +206,14 @@ function desenharTabela() {
       <td>${g.itens.length > 1
         ? `<select class="sel-rede" data-rede="${esc(g.symbol)}">${g.itens.map((m) => `<option value="${m.id}">${esc(m.rotulo)}</option>`).join('')}</select>`
         : `<span class="tag">${esc(g.itens[0].rotulo || g.itens[0].networkName)}</span>`}</td>
-      <td class="saldo"><div data-preco="${esc(g.symbol)}"></div><div class="usd" data-var="${esc(g.symbol)}"></div></td>
       <td class="saldo"><div data-saldo="${esc(g.symbol)}"></div><div class="usd" data-usd="${esc(g.symbol)}"></div></td>
+      <td class="saldo"><div data-preco="${esc(g.symbol)}"></div><div class="usd" data-var="${esc(g.symbol)}"></div></td>
+      <td class="saldo hoje" data-hoje="${esc(g.symbol)}"></td>
       <td class="botoes">
         <button data-receber-g="${esc(g.symbol)}">Receber</button>
         <button data-enviar-g="${esc(g.symbol)}" class="primario">Enviar</button>
       </td>
-    </tr>`).join('') + '<tr id="linha-vazia" class="hidden"><td colspan="5" class="cinza">Nenhuma moeda com saldo nesta carteira.</td></tr>';
+    </tr>`).join('') + '<tr id="linha-vazia" class="hidden"><td colspan="6" class="cinza">Nenhuma moeda com saldo nesta carteira.</td></tr>';
 
   for (const img of document.querySelectorAll('img.icone')) {
     img.addEventListener('error', function falhou() {
@@ -251,12 +252,20 @@ function atualizarCelulas() {
     cel.classList.toggle('erro', !!(sld && sld.erro));
     cel.title = sld && (sld.erro || sld.indisponivel) ? (sld.erro || sld.indisponivel) : '';
     const celUsd = document.querySelector(`[data-usd="${g.symbol}"]`);
-    if (celUsd) {
-      let t = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
-      if (t && sld.ganho24h != null && Math.abs(sld.ganho24h) >= 0.005) t += ` · hoje ${sld.ganho24h >= 0 ? '+' : '−'}${dolar(Math.abs(sld.ganho24h))}`;
-      celUsd.textContent = t;
-      celUsd.classList.toggle('sobe', !!(sld && sld.ganho24h > 0.005));
-      celUsd.classList.toggle('desce', !!(sld && sld.ganho24h < -0.005));
+    if (celUsd) celUsd.textContent = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
+    const celHoje = document.querySelector(`[data-hoje="${g.symbol}"]`);
+    if (celHoje) {
+      // ganho/perda de hoje somando todas as redes desta moeda
+      let soma = null;
+      for (const it of g.itens) {
+        const x = saldos[it.id];
+        if (x && !x.erro && !x.zero && x.ganho24h != null) soma = (soma || 0) + x.ganho24h;
+      }
+      const tem = soma != null && Math.abs(soma) >= 0.005;
+      celHoje.textContent = tem ? `${soma >= 0 ? '+' : '−'}${dolar(Math.abs(soma))}` : '—';
+      celHoje.classList.toggle('sobe', tem && soma > 0);
+      celHoje.classList.toggle('desce', tem && soma < 0);
+      celHoje.classList.toggle('cinza', !tem);
     }
     const comPreco = g.itens.map((m) => saldos[m.id]).find((x) => x && x.preco != null);
     const celPreco = document.querySelector(`[data-preco="${g.symbol}"]`);
