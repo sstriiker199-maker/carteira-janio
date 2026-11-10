@@ -1075,13 +1075,30 @@ $('btn-config').onclick = async () => {
     </div>
 
     <div class="secao">
+      <h3>Chaves de API (opcional, gratuitas)</h3>
+      <p class="ajuda">Com elas os saldos carregam mais rápido e sem bloqueio. Se uma chave falhar, o programa usa o servidor gratuito sozinho.</p>
+      <label>Alchemy — Ethereum, BNB Chain, Polygon e Avalanche</label>
+      <input id="k-alchemy" type="password" value="${esc(s.chaves.alchemy)}" placeholder="cole a API Key" spellcheck="false">
+      <p class="ajuda">Crie grátis em <b>dashboard.alchemy.com</b> → crie um app → copie a "API Key". No app, deixe ativadas as redes Ethereum, BNB, Polygon e Avalanche.</p>
+      <label>Helius — Solana (SOL e BONK)</label>
+      <input id="k-helius" type="password" value="${esc(s.chaves.helius)}" placeholder="cole a API Key" spellcheck="false">
+      <p class="ajuda">Crie grátis em <b>dashboard.helius.dev</b> → copie a "API Key".</p>
+      <label>TronGrid — Tron (TRX, USDT e USDC TRC-20)</label>
+      <input id="c-tronkey" type="password" value="${esc(s.tronApiKey)}" placeholder="cole a API Key" spellcheck="false">
+      <p class="ajuda">Crie grátis em <b>trongrid.io</b> → Dashboard → "Create API Key".</p>
+      <label>toncenter — TON</label>
+      <input id="k-toncenter" type="password" value="${esc(s.chaves.toncenter)}" placeholder="cole a API Key" spellcheck="false">
+      <p class="ajuda">No Telegram, fale com <b>@tonapibot</b> → "Manage API keys" → crie uma chave para <b>mainnet</b>.</p>
+      <button id="k-testar">Testar chaves</button>
+      <div id="k-res" class="ajuda"></div>
+    </div>
+
+    <div class="secao">
       <h3>Servidores das redes</h3>
-      <p class="ajuda">Deixe como está se tudo estiver funcionando.</p>
+      <p class="ajuda">Avançado: só mude se souber o que está fazendo. Se você preencheu as chaves acima, deixe estes como estão.</p>
       ${Object.keys(s.rpc).map((id) => `
         <label>${esc(s.names[id])}</label>
         <input data-rpc="${id}" value="${esc(s.rpc[id])}" placeholder="${esc(s.defaults[id])}" spellcheck="false">`).join('')}
-      <label>Chave da TronGrid (opcional, evita bloqueio por excesso de consultas)</label>
-      <input id="c-tronkey" value="${esc(s.tronApiKey)}" spellcheck="false">
       <button id="c-padrao">Restaurar servidores padrão</button>
     </div>
 
@@ -1097,6 +1114,13 @@ $('btn-config').onclick = async () => {
     envios: $('c-email-envios').checked
   });
   $('m-fechar').onclick = fecharModal;
+  $('k-testar').onclick = async () => {
+    $('k-res').textContent = 'Testando…';
+    try {
+      const r = await rpc('testarChaves', { chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value }, tronApiKey: $('c-tronkey').value });
+      $('k-res').innerHTML = Object.entries(r).map(([k, v]) => `${v === 'ok' ? '✅' : '❌'} <b>${esc(k)}</b> ${v === 'ok' ? 'funcionando' : esc(v)}`).join('<br>');
+    } catch (e) { $('k-res').textContent = e.message; }
+  };
   $('c-padrao').onclick = () => { for (const i of document.querySelectorAll('[data-rpc]')) i.value = s.defaults[i.dataset.rpc]; };
   $('c-email-teste').onclick = async () => {
     $('c-email-res').textContent = 'Enviando…';
@@ -1110,6 +1134,7 @@ $('btn-config').onclick = async () => {
       await rpc('saveSettings', {
         rpc: servidores,
         tronApiKey: $('c-tronkey').value,
+        chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value },
         intervalo: Number($('c-intervalo').value),
         carteiraTaxas: $('c-taxas').value,
         notificar: { entradas: $('c-not-entradas').checked, envios: $('c-not-envios').checked },

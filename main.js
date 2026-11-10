@@ -68,7 +68,13 @@ function settings() {
   const e = s.email || {};
   return {
     rpc,
+    rpcProprio: s.rpc || {},
     tronApiKey: s.tronApiKey || '',
+    chaves: {
+      alchemy: s.chaves && s.chaves.alchemy ? alertas.decifrar(s.chaves.alchemy) : '',
+      helius: s.chaves && s.chaves.helius ? alertas.decifrar(s.chaves.helius) : '',
+      toncenter: s.chaves && s.chaves.toncenter ? alertas.decifrar(s.chaves.toncenter) : ''
+    },
     intervalo: Math.max(3, Number(s.intervalo) || 3),
     carteiraTaxas: s.carteiraTaxas != null ? Number(s.carteiraTaxas) : null,
     notificar: { entradas: n.entradas !== false, envios: n.envios !== false },
@@ -152,9 +158,36 @@ function addressFor(index, networkId) {
   return k.ends[networkId];
 }
 
-function cfgRede(net) {
+// Lista de servidores de cada rede, em ordem: o seu (se colocou), o da sua chave de API, e o gratuito por último
+const ALCHEMY = { ethereum: 'eth-mainnet', bsc: 'bnb-mainnet', polygon: 'polygon-mainnet', avalanche: 'avax-mainnet' };
+function servidores(net) {
   const s = settings();
-  return { rpc: s.rpc[net.id], apiKey: net.kind === 'tron' ? s.tronApiKey : undefined };
+  const lista = [];
+  if (s.rpcProprio[net.id]) lista.push({ rpc: s.rpcProprio[net.id], apiKey: net.id === 'tron' ? s.tronApiKey || undefined : net.id === 'ton' ? s.chaves.toncenter || undefined : undefined, origem: 'seu servidor' });
+  if (ALCHEMY[net.id] && s.chaves.alchemy) lista.push({ rpc: `https://${ALCHEMY[net.id]}.g.alchemy.com/v2/${s.chaves.alchemy}`, origem: 'Alchemy' });
+  if (net.id === 'solana' && s.chaves.helius) lista.push({ rpc: `https://mainnet.helius-rpc.com/?api-key=${s.chaves.helius}`, origem: 'Helius' });
+  if (net.id === 'tron' && s.tronApiKey) lista.push({ rpc: net.rpc, apiKey: s.tronApiKey, origem: 'TronGrid (chave)' });
+  if (net.id === 'ton' && s.chaves.toncenter) lista.push({ rpc: net.rpc, apiKey: s.chaves.toncenter, origem: 'toncenter (chave)' });
+  lista.push({ rpc: net.rpc, origem: 'gratuito' });
+  const vistos = new Set();
+  return lista.filter((x) => { const k = x.rpc + '|' + (x.apiKey || ''); if (vistos.has(k)) return false; vistos.add(k); return true; });
+}
+
+function cfgRede(net) {
+  return servidores(net)[0];
+}
+
+// Tenta no servidor principal; se falhar, usa o próximo (só para consultas, nunca para envio)
+async function comReserva(net, fn) {
+  const lista = servidores(net);
+  let ultimoErro;
+  for (const cfg of lista) {
+    try { return await fn(cfg); } catch (e) {
+      if (e instanceof Indisponivel || e.naoRepetir) throw e;
+      ultimoErro = e;
+    }
+  }
+  throw ultimoErro;
 }
 
 function linkExplorer(net, hash) {
@@ -305,12 +338,13 @@ handle('assets', () => ASSETS.map((a) => ({ ...a, networkName: NETWORKS[a.networ
 
 async function fetchBalance(index, assetId) {
   const { asset, net } = getAsset(assetId);
-  const s = settings();
   const address = addressFor(index, net.id);
-  if (net.kind === 'tron') return tron.balance({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, address);
-  if (net.kind === 'evm') return evm.balance(net, s.rpc[net.id], asset, address);
-  if (net.kind === 'utxo') return MOD.utxo().saldo(cfgRede(net), net.coin, asset, address);
-  return MOD[net.kind]().saldo(cfgRede(net), asset, address);
+  return comReserva(net, (cfg) => {
+    if (net.kind === 'tron') return tron.balance(cfg, asset, address);
+    if (net.kind === 'evm') return evm.balance(net, cfg.rpc, asset, address);
+    if (net.kind === 'utxo') return MOD.utxo().saldo(cfg, net.coin, asset, address);
+    return MOD[net.kind]().saldo(cfg, asset, address);
+  });
 }
 
 handle('balance', async ({ index, assetId }) => {
@@ -825,29 +859,37 @@ function nativoDe(net) {
 }
 
 async function prepararOuEnviar(mode, { index, asset, net, to, amount, max, velocidade, valorRaw, memo }) {
-  const s = settings();
   const k = keysFor(index);
-  if (net.kind !== 'evm' && net.kind !== 'tron') {
-    const mod = net.kind === 'utxo' ? MOD.utxo() : MOD[net.kind]();
-    const args = { cfg: cfgRede(net), coin: net.coin, asset, chave: chaveRede(index, net), to, amount, max, velocidade, valorRaw, memo };
-    return mode === 'send' ? mod.enviar(args) : mod.preparar(args);
-  }
-  if (net.kind === 'tron') {
-    const args = { cfg: { rpc: s.rpc.tron, apiKey: s.tronApiKey }, asset, from: k.tronAddress, privateKey: k.tronPrivateKey, to, amount, max, valorRaw };
-    return mode === 'send' ? tron.send(args) : tron.prepare(args);
-  }
-  const args = { net, url: s.rpc[net.id], asset, wallet: k.evm, to, amount, max, velocidade, valorRaw };
-  return mode === 'send' ? evm.send(args) : evm.prepare(args);
+  const executar = (cfg) => {
+    if (net.kind !== 'evm' && net.kind !== 'tron') {
+      const mod = net.kind === 'utxo' ? MOD.utxo() : MOD[net.kind]();
+      const args = { cfg, coin: net.coin, asset, chave: chaveRede(index, net), to, amount, max, velocidade, valorRaw, memo };
+      return mode === 'send' ? mod.enviar(args) : mod.preparar(args);
+    }
+    if (net.kind === 'tron') {
+      const args = { cfg, asset, from: k.tronAddress, privateKey: k.tronPrivateKey, to, amount, max, valorRaw };
+      return mode === 'send' ? tron.send(args) : tron.prepare(args);
+    }
+    const args = { net, url: cfg.rpc, asset, wallet: k.evm, to, amount, max, velocidade, valorRaw };
+    return mode === 'send' ? evm.send(args) : evm.prepare(args);
+  };
+  // envio usa só o servidor principal (para nunca enviar duas vezes); cálculo usa reserva
+  if (mode === 'send') return executar(cfgRede(net));
+  return comReserva(net, async (cfg) => {
+    try { return await executar(cfg); } catch (e) {
+      // erros de saldo/endereço não são falha de servidor: não adianta tentar outro
+      if (!/fetch failed|timeout|ETIMEDOUT|ECONN|ENOTFOUND|429|401|403|5\d\d|rate|limit|network|servidor|SERVER_ERROR|demorou/i.test(String(e && (e.shortMessage || e.message)))) { e.naoRepetir = true; }
+      throw e;
+    }
+  }).catch((e) => { throw e; });
 }
 
 async function esperarConfirmacao(net, hash, index) {
-  const s = settings();
-  if (net.kind === 'utxo') return MOD.utxo().confirmar(cfgRede(net), net.coin, hash);
-  if (net.kind === 'ton') return MOD.ton().confirmar(cfgRede(net), hash, chaveRede(index, net).seed32);
-  if (net.kind !== 'evm' && net.kind !== 'tron') return MOD[net.kind]().confirmar(cfgRede(net), hash);
-  return net.kind === 'tron'
-    ? tron.waitConfirm({ rpc: s.rpc.tron, apiKey: s.tronApiKey }, hash)
-    : evm.waitConfirm(net, s.rpc[net.id], hash);
+  const cfg = cfgRede(net);
+  if (net.kind === 'utxo') return MOD.utxo().confirmar(cfg, net.coin, hash);
+  if (net.kind === 'ton') return MOD.ton().confirmar(cfg, hash, chaveRede(index, net).seed32);
+  if (net.kind !== 'evm' && net.kind !== 'tron') return MOD[net.kind]().confirmar(cfg, hash);
+  return net.kind === 'tron' ? tron.waitConfirm(cfg, hash) : evm.waitConfirm(net, cfg.rpc, hash);
 }
 
 // Se a carteira não tem moeda para a taxa, calcula quanto a carteira de taxas manda
@@ -987,7 +1029,7 @@ function montarEmail(email, anterior) {
   };
 }
 
-handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteiraTaxas }) => {
+handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteiraTaxas, chaves }) => {
   const clean = {};
   for (const id of Object.keys(NETWORKS)) {
     const u = String((rpc && rpc[id]) || '').trim();
@@ -1000,6 +1042,12 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteira
   writeJson(cfgFile(), {
     rpc: clean,
     tronApiKey: String(tronApiKey || '').trim(),
+    chaves: {
+      alchemy: alertas.cifrar(String((chaves && chaves.alchemy) || '').trim()),
+      helius: alertas.cifrar(String((chaves && chaves.helius) || '').trim()),
+      toncenter: alertas.cifrar(String((chaves && chaves.toncenter) || '').trim())
+    },
+    swap: (readJson(cfgFile()) || {}).swap,
     intervalo: Math.max(3, Number(intervalo) || 3),
     carteiraTaxas: carteiraTaxas === '' || carteiraTaxas == null ? null : Number(carteiraTaxas),
     notificar: { entradas: !(notificar && notificar.entradas === false), envios: !(notificar && notificar.envios === false) },
@@ -1007,6 +1055,40 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteira
   });
   cicloMonitor();
   return true;
+});
+
+handle('testarChaves', async ({ chaves, tronApiKey }) => {
+  const out = {};
+  const post = async (url, body, headers = {}) => {
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+    const t = await r.text();
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${t.slice(0, 120)}`);
+    const j = JSON.parse(t);
+    if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+    return j;
+  };
+  const k = chaves || {};
+  if (String(k.alchemy || '').trim()) {
+    for (const [id, sub] of Object.entries(ALCHEMY)) {
+      try { await post(`https://${sub}.g.alchemy.com/v2/${k.alchemy.trim()}`, { jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }); out['Alchemy ' + NETWORKS[id].name] = 'ok'; }
+      catch (e) { out['Alchemy ' + NETWORKS[id].name] = 'erro: ' + e.message + (/not enabled|disabled/i.test(e.message) ? ' (ative essa rede no painel da Alchemy)' : ''); }
+    }
+  }
+  if (String(k.helius || '').trim()) {
+    try { await post(`https://mainnet.helius-rpc.com/?api-key=${k.helius.trim()}`, { jsonrpc: '2.0', id: 1, method: 'getSlot' }); out.Helius = 'ok'; } catch (e) { out.Helius = 'erro: ' + e.message; }
+  }
+  if (String(tronApiKey || '').trim()) {
+    try { await post('https://api.trongrid.io/wallet/getnowblock', {}, { 'TRON-PRO-API-KEY': tronApiKey.trim() }); out.TronGrid = 'ok'; } catch (e) { out.TronGrid = 'erro: ' + e.message; }
+  }
+  if (String(k.toncenter || '').trim()) {
+    try {
+      const r = await fetch('https://toncenter.com/api/v2/getMasterchainInfo', { headers: { 'X-API-Key': k.toncenter.trim() }, signal: AbortSignal.timeout(15000) });
+      const j = await r.json();
+      out.toncenter = j.ok ? 'ok' : 'erro: ' + (j.error || r.status);
+    } catch (e) { out.toncenter = 'erro: ' + e.message; }
+  }
+  if (!Object.keys(out).length) throw new Error('Preencha pelo menos uma chave.');
+  return out;
 });
 
 handle('testarEmail', async ({ email }) => {
@@ -1122,6 +1204,9 @@ app.whenReady().then(() => {
           await t('verif lixo', () => c('verificarEndereco', { assetId: 'xrp', endereco: 'abc123' }));
           await t('swap cotar (EUA bloqueado é esperado)', () => c('swapCotar', { index: 0, de: 'usdt-tron', para: 'sol', amount: '20' }));
           await t('tela trocar', async () => { document.getElementById('btn-trocar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.getElementById('s-de') ? document.getElementById('s-de').options.length : -1; fecharModal(); return n + ' moedas com saldo'; });
+          await t('servidores bsc', async () => 'ok');
+          await t('testar chaves falsas', () => c('testarChaves', { chaves: { alchemy: 'chave-falsa', helius: 'chave-falsa', toncenter: 'falsa' }, tronApiKey: 'falsa' }));
+          await t('salvar chave falsa e ver reserva', async () => { await c('saveSettings', { rpc: {}, tronApiKey: '', intervalo: 3, notificar: {}, email: {}, carteiraTaxas: '', chaves: { alchemy: 'chave-falsa', helius: 'chave-falsa', toncenter: '' } }); return [await c('balance', { index: 0, assetId: 'usdt-bsc' }), await c('balance', { index: 0, assetId: 'sol' })]; });
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));
