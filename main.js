@@ -73,7 +73,9 @@ function settings() {
     chaves: {
       alchemy: s.chaves && s.chaves.alchemy ? alertas.decifrar(s.chaves.alchemy) : '',
       helius: s.chaves && s.chaves.helius ? alertas.decifrar(s.chaves.helius) : '',
-      toncenter: s.chaves && s.chaves.toncenter ? alertas.decifrar(s.chaves.toncenter) : ''
+      toncenter: s.chaves && s.chaves.toncenter ? alertas.decifrar(s.chaves.toncenter) : '',
+      changenow: s.chaves && s.chaves.changenow ? alertas.decifrar(s.chaves.changenow) : '',
+      lifi: s.chaves && s.chaves.lifi ? alertas.decifrar(s.chaves.lifi) : ''
     },
     intervalo: Math.max(3, Number(s.intervalo) || 3),
     todasIntervalo: s.todasIntervalo != null ? s.todasIntervalo : 'auto',
@@ -803,6 +805,161 @@ handle('swapExecutar', async ({ quoteId, index, de, para, destinoIndex }) => {
   return { id: sh.id, pagina: `https://sideshift.ai/orders/${sh.id}`, envia: sh.depositAmount, recebe: sh.settleAmount };
 });
 
+// ---------- Comparador de trocas (SideShift, THORChain, LI.FI, ChangeNOW) ----------
+const trocas = require('./src/trocas');
+
+function brutoDe(asset, valorTxt) {
+  const d = asset.decimals != null ? asset.decimals : 18;
+  return require('./src/util').parseAmount(valorTxt, d);
+}
+
+handle('swapComparar', async ({ index, de, para, amount, destinoIndex }) => {
+  requireUnlocked();
+  if (de === para) throw new Error('Escolha moedas diferentes.');
+  const A = getAsset(de);
+  const B = getAsset(para);
+  const valor = String(amount || '').trim().replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(valor) || Number(valor) <= 0) throw new Error('Digite o valor que você quer trocar.');
+  const raw = brutoDe(A.asset, valor);
+  await precos.atualizar().catch(() => {});
+  const pDe = precos.preco(A.asset.symbol);
+  const pPara = precos.preco(B.asset.symbol);
+  const enviaUsd = pDe != null ? Number(valor) * pDe : null;
+  const origem = addressFor(Number(index), A.net.id);
+  const destino = addressFor(destinoIndex != null ? Number(destinoIndex) : Number(index), B.net.id);
+  const ch = settings().chaves;
+
+  const provedores = {
+    sideshift: async () => {
+      const perm = await swap.permissoes();
+      if (!perm.createShift) throw new Error('indisponível na sua região/conexão');
+      const sd = await swap.suportado(A.asset.symbol, A.net.id);
+      const sp = await swap.suportado(B.asset.symbol, B.net.id);
+      if (!sd || !sp) throw new Error('par não disponível');
+      const conta = await contaSwap();
+      const q = await swap.cotar({ secret: conta.secret, affiliateId: conta.id, de: sd, para: sp, valor });
+      return { recebe: Number(q.settleAmount), tempo: null, dados: { quoteId: q.id }, expira: q.expiresAt };
+    },
+    thorchain: () => trocas.thorCotar({ de: A.asset, para: B.asset, valorRaw: raw, decimaisDe: A.asset.decimals, destino }),
+    lifi: () => trocas.lifiCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino, chave: ch.lifi }),
+    changenow: () => trocas.cnCotar({ de: A.asset, para: B.asset, valor, chave: ch.changenow })
+  };
+  const NOMES = { sideshift: 'SideShift', thorchain: 'THORChain', lifi: 'LI.FI', changenow: 'ChangeNOW' };
+  const res = await Promise.allSettled(Object.entries(provedores).map(async ([id, fn]) => ({ id, q: await comTempo(fn(), 25000) })));
+  const cotacoes = [];
+  const fora = [];
+  res.forEach((r, i) => {
+    const id = Object.keys(provedores)[i];
+    if (r.status === 'rejected') { fora.push({ nome: NOMES[id], motivo: String(r.reason && r.reason.message || r.reason).slice(0, 160) }); return; }
+    const q = r.value.q;
+    const recebeUsd = pPara != null ? q.recebe * pPara : null;
+    cotacoes.push({
+      provedor: id, nome: NOMES[id] + (q.ferramenta ? ` (${q.ferramenta})` : ''), recebe: q.recebe, recebeUsd,
+      custoUsd: enviaUsd != null && recebeUsd != null ? enviaUsd - recebeUsd : null,
+      tempo: q.tempo, aviso: q.aviso || '', dados: q.dados, expira: q.expira || null
+    });
+  });
+  cotacoes.sort((x, y) => y.recebe - x.recebe);
+  return {
+    envia: valor, enviaUsd, de: `${A.asset.symbol} (${A.net.rotulo})`, para: `${B.asset.symbol} (${B.net.rotulo})`,
+    paraSymbol: B.asset.symbol, cotacoes, fora
+  };
+});
+
+async function acompanharTrocaGenerica(consultar, idAtiv, textoPara) {
+  const fim = Date.now() + 3 * 60 * 60 * 1000;
+  let ultimo = '';
+  while (Date.now() < fim) {
+    await new Promise((r) => setTimeout(r, 20000));
+    let st;
+    try { st = await consultar(); } catch { continue; }
+    if (st.status !== ultimo) {
+      ultimo = st.status;
+      atualizarAtividade(idAtiv, { status: st.status, recebido: st.recebido });
+      if (st.status === 'concluída') {
+        alertas.avisar({ cfg: settings(), tipo: 'entradas', log, aoClicar: abrirJanela, titulo: 'Troca concluída ✓', corpo: `Você recebeu ${st.recebido ? st.recebido + ' ' : ''}${textoPara}` });
+        cicloMonitor();
+        return;
+      }
+      if (['falhou', 'devolvida', 'expirada'].includes(st.status)) {
+        alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Troca: ' + st.status, corpo: 'Veja os detalhes na aba Atividade.' });
+        return;
+      }
+    }
+  }
+}
+
+handle('swapExecutarProvedor', async ({ provedor, dados, index, de, para, amount, destinoIndex }) => {
+  requireUnlocked();
+  const A = getAsset(de);
+  const B = getAsset(para);
+  const w = getWallet(readJson(dataFile()), index);
+  const destIdx = destinoIndex != null ? Number(destinoIndex) : Number(index);
+  const destino = addressFor(destIdx, B.net.id);
+  const valor = String(amount).trim().replace(',', '.');
+  const raw = brutoDe(A.asset, valor);
+  const ch = settings().chaves;
+  const textoPara = `${B.asset.symbol} (${B.net.rotulo})`;
+  const base = { tipo: 'swap', index: Number(index), carteira: w.name, valor, symbol: A.asset.symbol, rede: A.net.rotulo, paraSymbol: B.asset.symbol, paraRede: B.net.rotulo };
+
+  if (provedor === 'sideshift') {
+    {
+      const conta = await contaSwap();
+      const sh = await swap.criarTroca({ secret: conta.secret, affiliateId: conta.id, quoteId: dados.quoteId, settleAddress: destino, refundAddress: addressFor(Number(index), A.net.id) });
+      const idAtiv = registrar({ ...base, valor: sh.depositAmount, paraValor: sh.settleAmount, provedor: 'SideShift', status: 'enviando depósito', explorer: `https://sideshift.ai/orders/${sh.id}`, hash: sh.id });
+      await runTransfer('send', { index, assetId: de, to: sh.depositAddress, amount: arredondarCima(sh.depositAmount, Math.min(A.asset.decimals || 8, 8)), memo: sh.depositMemo || undefined });
+      acompanharSwap(sh.id, idAtiv, textoPara);
+      return { pagina: `https://sideshift.ai/orders/${sh.id}`, envia: sh.depositAmount, recebe: sh.settleAmount };
+    }
+  }
+
+  if (provedor === 'changenow') {
+    const ex = await trocas.cnCriar({ chave: ch.changenow, a: dados.a, b: dados.b, valor, destino, reembolso: addressFor(Number(index), A.net.id) });
+    if (!ex.payinAddress) throw new Error('A ChangeNOW não devolveu o endereço de depósito: ' + (ex.message || ''));
+    const pagina = `https://changenow.io/exchange/txs/${ex.id}`;
+    const idAtiv = registrar({ ...base, paraValor: ex.toAmount, provedor: 'ChangeNOW', status: 'enviando depósito', explorer: pagina, hash: ex.id });
+    await runTransfer('send', { index, assetId: de, to: ex.payinAddress, amount: valor, memo: ex.payinExtraId || undefined });
+    acompanharTrocaGenerica(() => trocas.cnStatus(ch.changenow, ex.id), idAtiv, textoPara);
+    return { pagina, envia: valor, recebe: ex.toAmount };
+  }
+
+  if (provedor === 'thorchain') {
+    // cotação nova na hora (o "memo" e o prazo precisam estar frescos)
+    const q = await trocas.thorCotar({ de: A.asset, para: B.asset, valorRaw: raw, decimaisDe: A.asset.decimals, destino });
+    let hash;
+    if (A.net.kind === 'utxo') {
+      const r = await MOD.utxo().enviar({ cfg: cfgRede(A.net), coin: A.net.coin, asset: A.asset, chave: chaveRede(Number(index), A.net), to: q.dados.inbound, valorRaw: raw, velocidade: 'normal', opReturn: q.dados.memo });
+      hash = r.hash;
+    } else if (A.net.kind === 'evm') {
+      if (!q.dados.router) throw new Error('A THORChain não informou o roteador desta rede.');
+      hash = await evm.depositarThorchain({ net: A.net, url: cfgRede(A.net).rpc, wallet: keysFor(Number(index)).evm, asset: A.asset, router: q.dados.router, vault: q.dados.inbound, valor: raw, memo: q.dados.memo, expiry: q.dados.expiry });
+    } else throw new Error('Envio para a THORChain a partir desta rede ainda não é suportado.');
+    const pagina = `https://thorchain.net/tx/${String(hash).replace(/^0x/, '')}`;
+    const idAtiv = registrar({ ...base, paraValor: String(q.recebe), provedor: 'THORChain', status: 'aguardando a rede', explorer: pagina, hash });
+    acompanharTrocaGenerica(async () => ({ status: await trocas.thorStatus(hash) }), idAtiv, textoPara);
+    setTimeout(() => reverificar([Number(index)]).catch(() => {}), 30000);
+    return { pagina, envia: valor, recebe: String(q.recebe) };
+  }
+
+  if (provedor === 'lifi') {
+    const origem = addressFor(Number(index), A.net.id);
+    const q = await trocas.lifiCotar({ de: A.asset, para: B.asset, valorRaw: raw, origem, destino, chave: ch.lifi });
+    if (!q.dados.txReq) throw new Error('A LI.FI não devolveu a transação.');
+    let hash;
+    if (A.net.kind === 'evm') {
+      hash = await evm.executarLifi({ net: A.net, url: cfgRede(A.net).rpc, wallet: keysFor(Number(index)).evm, asset: A.asset, txReq: q.dados.txReq, aprovarPara: q.dados.aprovarPara, valor: raw });
+    } else if (A.net.kind === 'solana') {
+      hash = await MOD.solana().executarLifi(cfgRede(A.net), chaveRede(Number(index), A.net), q.dados.txReq.data);
+    } else throw new Error('Rede não suportada pela LI.FI.');
+    const pagina = `https://scan.li.fi/tx/${hash}`;
+    const idAtiv = registrar({ ...base, paraValor: String(q.recebe), provedor: 'LI.FI', status: 'trocando', explorer: pagina, hash });
+    acompanharTrocaGenerica(async () => ({ status: await trocas.lifiStatus(hash, q.dados.fromChain, q.dados.toChain) }), idAtiv, textoPara);
+    setTimeout(() => reverificar([Number(index)]).catch(() => {}), 30000);
+    return { pagina, envia: valor, recebe: String(q.recebe) };
+  }
+  throw new Error('Serviço de troca desconhecido.');
+});
+
 // ---------- Contatos (endereços favoritos) ----------
 const contatosFile = () => path.join(dataDir(), 'contatos.json');
 handle('contatos', ({ rede }) => {
@@ -1200,7 +1357,9 @@ handle('saveSettings', ({ rpc, tronApiKey, intervalo, notificar, email, carteira
     chaves: {
       alchemy: alertas.cifrar(String((chaves && chaves.alchemy) || '').trim()),
       helius: alertas.cifrar(String((chaves && chaves.helius) || '').trim()),
-      toncenter: alertas.cifrar(String((chaves && chaves.toncenter) || '').trim())
+      toncenter: alertas.cifrar(String((chaves && chaves.toncenter) || '').trim()),
+      changenow: alertas.cifrar(String((chaves && chaves.changenow) || '').trim()),
+      lifi: alertas.cifrar(String((chaves && chaves.lifi) || '').trim())
     },
     swap: (readJson(cfgFile()) || {}).swap,
     intervalo: Math.max(3, Number(intervalo) || 3),
@@ -1242,6 +1401,12 @@ handle('testarChaves', async ({ chaves, tronApiKey }) => {
       const j = await r.json();
       out.toncenter = j.ok ? 'ok' : 'erro: ' + (j.error || r.status);
     } catch (e) { out.toncenter = 'erro: ' + e.message; }
+  }
+  if (String(k.changenow || '').trim()) {
+    try {
+      const r = await fetch('https://api.changenow.io/v2/exchange/min-amount?fromCurrency=btc&toCurrency=eth&fromNetwork=btc&toNetwork=eth&flow=standard', { headers: { 'x-changenow-api-key': k.changenow.trim() }, signal: AbortSignal.timeout(15000) });
+      out.ChangeNOW = r.ok ? 'ok' : 'erro: HTTP ' + r.status + ' ' + (await r.text()).slice(0, 100);
+    } catch (e) { out.ChangeNOW = 'erro: ' + e.message; }
   }
   if (!Object.keys(out).length) throw new Error('Preencha pelo menos uma chave.');
   return out;
@@ -1386,6 +1551,9 @@ app.whenReady().then(() => {
           await t('cotacao sol', () => c('cotacao', { assetId: 'sol' }));
           await t('tela express', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('.xp-card').length; fecharModal(); return n + ' cartões express'; });
           await t('tela envio rapido', async () => { document.getElementById('btn-rapido').click(); await new Promise(r => setTimeout(r, 400)); const n = document.querySelectorAll('.er-dest').length; const de = document.getElementById('er-de').selectedOptions[0].textContent; fecharModal(); return n + ' destinos; de ' + de; });
+          for (const [de, para, v] of [['usdt-bsc', 'sol', '50'], ['btc', 'eth', '0.01'], ['eth', 'bch', '0.1'], ['usdt-bsc', 'usdc-polygon', '50'], ['sol', 'bonk', '1'], ['bnb', 'xrp', '0.5']]) {
+            await t('comparar ' + de + '->' + para, async () => { const r = await c('swapComparar', { index: 0, de, para, amount: v }); return { ok: r.cotacoes.map(q => q.nome + '=' + q.recebe.toFixed(6) + ' custo ' + (q.custoUsd != null ? q.custoUsd.toFixed(2) : '?')), fora: r.fora.map(f => f.nome + ': ' + f.motivo.slice(0, 60)) }; });
+          }
           await t('tela juntar', async () => { document.getElementById('btn-juntar').click(); await new Promise(r => setTimeout(r, 300)); const n = document.querySelectorAll('.j-moeda').length; fecharModal(); return n + ' moedas'; });
           await t('tela favoritos', async () => { await document.getElementById('btn-contatos').onclick(); const n = document.querySelectorAll('[data-fapagar]').length; fecharModal(); return n + ' favoritos'; });
           await t('importar chave', async () => (await c('importWallet', { tipo: 'chave', segredo: '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318', name: 'MetaMask' })).map(w => w.name));

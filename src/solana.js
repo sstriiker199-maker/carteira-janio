@@ -126,4 +126,13 @@ async function confirmar(cfg, sig) {
   return 'pendente';
 }
 
-module.exports = { endereco, validar, saldo, preparar, enviar, confirmar };
+// executa a transação pronta da LI.FI na Solana
+async function executarLifi(cfg, chave, dataBase64) {
+  const c = conn(cfg);
+  const kp = keypair(chave.seed32);
+  const tx = web3.VersionedTransaction.deserialize(Buffer.from(dataBase64, 'base64'));
+  tx.sign([kp]);
+  return c.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 5 });
+}
+
+module.exports = { endereco, validar, saldo, preparar, enviar, confirmar, executarLifi };

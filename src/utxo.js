@@ -105,7 +105,7 @@ async function saldo(cfg, coin, asset, addr) {
 }
 
 // ---------- Montar ----------
-async function preparar({ cfg, coin, asset, chave, to, amount, max, velocidade, valorRaw }) {
+async function preparar({ cfg, coin, asset, chave, to, amount, max, velocidade, valorRaw, opReturn }) {
   const c = REDES[coin];
   const de = endereco(coin, chave.pubkey);
   const script = scriptDestino(coin, to);
@@ -114,7 +114,8 @@ async function preparar({ cfg, coin, asset, chave, to, amount, max, velocidade, 
   const [lista, tx] = await Promise.all([utxos(cfg, coin, de), taxas(cfg, coin)]);
   if (!lista.length) throw new Error(`Você não tem ${asset.symbol} nesta carteira (ou ainda não confirmou).`);
   const total = lista.reduce((a, u) => a + u.value, 0);
-  const custo = (rate, nIn, nOut) => Math.ceil(tamanho(coin, nIn, nOut) * rate);
+  const extra = opReturn ? 11 + Buffer.byteLength(opReturn) : 0; // saída com o "memo" (troca THORChain)
+  const custo = (rate, nIn, nOut) => Math.ceil((tamanho(coin, nIn, nOut) + extra) * rate);
 
   let valor;
   let usados;
@@ -146,7 +147,7 @@ async function preparar({ cfg, coin, asset, chave, to, amount, max, velocidade, 
   const opcoes = Object.fromEntries(Object.entries(tx).map(([v, r]) => [v, BigInt(custo(r, usados.length, nOut))]));
   return {
     value: BigInt(valor), decimals: 8, fee: BigInt(fee), feeMax: BigInt(fee), feeDecimals: 8, to: String(to).trim(),
-    velocidade: vel, opcoes, _plano: { usados, valor, troco, script, de }
+    velocidade: vel, opcoes, _plano: { usados, valor, troco, script, de, opReturn }
   };
 }
 
@@ -170,6 +171,7 @@ function montarTx(coin, chave, plano) {
     psbt.setMaximumFeeRate(100000);
     for (const u of plano.usados) psbt.addInput({ hash: u.txid, index: u.vout, witnessUtxo: { script: meuScript, value: u.value } });
     psbt.addOutput({ script: plano.script, value: plano.valor });
+    if (plano.opReturn) psbt.addOutput({ script: bitcoin.payments.embed({ data: [Buffer.from(plano.opReturn)] }).output, value: 0 });
     if (plano.troco > 0) psbt.addOutput({ script: meuScript, value: plano.troco });
     psbt.signAllInputs({ publicKey: chave.pubkey, sign: assinar });
     psbt.finalizeAllInputs();
@@ -180,6 +182,7 @@ function montarTx(coin, chave, plano) {
   tx.version = coin === 'bch' ? 2 : 1;
   for (const u of plano.usados) tx.addInput(Buffer.from(u.txid, 'hex').reverse(), u.vout);
   tx.addOutput(plano.script, plano.valor);
+  if (plano.opReturn) tx.addOutput(bitcoin.payments.embed({ data: [Buffer.from(plano.opReturn)] }).output, 0);
   if (plano.troco > 0) tx.addOutput(meuScript, plano.troco);
   plano.usados.forEach((u, i) => {
     let der;

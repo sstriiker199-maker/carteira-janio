@@ -184,3 +184,8 @@ table.moedas td.botoes { text-align: left; }
 .xp-st a { color: #8ab4ff; }
 select.curto2 { width: 120px; margin-bottom: 12px; }
 input.curto3 { width: 180px; margin: 0; }
+
+table.cot td, table.cot th { padding: 7px 8px; vertical-align: top; }
+table.cot tr.melhor { background: #18301f; }
+button.armado { background: #b91c1c !important; }
+details.ajuda summary { cursor: pointer; }

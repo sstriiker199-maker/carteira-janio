@@ -128,4 +128,52 @@ async function waitConfirm(net, url, hash) {
   return receipt.status === 1 ? 'ok' : 'falhou';
 }
 
-module.exports = { balance, prepare, send, waitConfirm, isAddress };
+// ---------- Trocas: THORChain (roteador) e LI.FI (transação pronta) ----------
+const ERC20_APROVAR = new Interface([
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)'
+]);
+const ROTEADOR = new Interface(['function depositWithExpiry(address vault, address asset, uint256 amount, string memo, uint256 expiration) payable']);
+const ZERO = '0x0000000000000000000000000000000000000000';
+
+async function aprovarSePreciso(net, url, wallet, token, gastador, valor) {
+  const p = provider(net, url);
+  const c = new Contract(token, ERC20_APROVAR, p);
+  const atual = await c.allowance(wallet.address, gastador);
+  if (atual >= valor) return null;
+  const f = (await fees(net, p)).normal;
+  const data = ERC20_APROVAR.encodeFunctionData('approve', [gastador, valor]);
+  let gasLimit;
+  try { gasLimit = (await p.estimateGas({ from: wallet.address, to: token, data })) * 13n / 10n; } catch { gasLimit = 80000n; }
+  const tx = await wallet.connect(p).sendTransaction({ to: token, data, gasLimit, chainId: net.chainId, ...f.fields });
+  await p.waitForTransaction(tx.hash, 1, 5 * 60 * 1000);
+  return tx.hash;
+}
+
+// envia para o roteador da THORChain (moeda principal ou token)
+async function depositarThorchain({ net, url, wallet, asset, router, vault, valor, memo, expiry }) {
+  const p = provider(net, url);
+  const token = asset.native ? ZERO : asset.contract;
+  if (!asset.native) await aprovarSePreciso(net, url, wallet, asset.contract, router, valor);
+  const data = ROTEADOR.encodeFunctionData('depositWithExpiry', [vault, token, valor, memo, BigInt(expiry)]);
+  const f = (await fees(net, p)).normal;
+  const value = asset.native ? valor : 0n;
+  let gasLimit;
+  try { gasLimit = (await p.estimateGas({ from: wallet.address, to: router, data, value })) * 13n / 10n; } catch { gasLimit = asset.native ? 120000n : 180000n; }
+  const tx = await wallet.connect(p).sendTransaction({ to: router, data, value, gasLimit, chainId: net.chainId, ...f.fields });
+  return tx.hash;
+}
+
+// executa a transação pronta da LI.FI (aprova o token antes, se precisar)
+async function executarLifi({ net, url, wallet, asset, txReq, aprovarPara, valor }) {
+  const p = provider(net, url);
+  if (!asset.native && aprovarPara) await aprovarSePreciso(net, url, wallet, asset.contract, aprovarPara, valor);
+  const f = (await fees(net, p)).normal;
+  const req = { to: txReq.to, data: txReq.data, value: txReq.value ? BigInt(txReq.value) : 0n, chainId: net.chainId, ...f.fields };
+  try { req.gasLimit = (await p.estimateGas({ from: wallet.address, to: req.to, data: req.data, value: req.value })) * 13n / 10n; }
+  catch { if (txReq.gasLimit) req.gasLimit = BigInt(txReq.gasLimit); }
+  const tx = await wallet.connect(p).sendTransaction(req);
+  return tx.hash;
+}
+
+module.exports = { balance, prepare, send, waitConfirm, isAddress, depositarThorchain, executarLifi };

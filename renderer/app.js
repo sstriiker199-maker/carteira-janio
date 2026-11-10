@@ -697,10 +697,10 @@ $('btn-trocar').onclick = () => {
     <select id="s-para">${opPara}</select>
     <label>Receber na carteira</label>
     <select id="s-destino">${carteiras.map((c) => `<option value="${c.index}" ${c.index === atual ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-    <p class="ajuda">A troca é feita pela SideShift.ai. A taxa dela já vem embutida na cotação. Valores muito pequenos podem não ser aceitos (mínimo deles).</p>
+    <p class="ajuda">O programa compara SideShift, THORChain, LI.FI e ChangeNOW e mostra o mais barato. Valores muito pequenos podem não ser aceitos (mínimo de cada serviço).</p>
     <p id="m-erro" class="erro"></p>
     <div id="s-resumo"></div>
-    <div class="linha" id="s-botoes"><button id="m-fechar">Cancelar</button><button id="s-cotar" class="primario">Ver cotação</button></div>`);
+    <div class="linha" id="s-botoes"><button id="m-fechar">Cancelar</button><button id="s-cotar" class="primario">Comparar cotações</button></div>`);
   $('m-fechar').onclick = fecharModal;
   const limpar = () => { $('s-resumo').innerHTML = ''; $('m-erro').textContent = ''; const c = $('s-confirmar'); if (c) c.remove(); };
   for (const id of ['s-de', 's-para', 's-valor', 's-destino']) $(id).addEventListener('input', limpar);
@@ -715,38 +715,53 @@ $('btn-trocar').onclick = () => {
   $('s-cotar').onclick = async () => {
     limpar();
     $('s-cotar').disabled = true;
-    $('s-cotar').textContent = 'Cotando…';
+    $('s-cotar').textContent = 'Comparando 4 serviços…';
+    const pedido = { index: atual, de: $('s-de').value, para: $('s-para').value, amount: $('s-valor').value, destinoIndex: Number($('s-destino').value) };
     try {
-      const q = await rpc('swapCotar', { index: atual, de: $('s-de').value, para: $('s-para').value, amount: $('s-valor').value });
-      const ate = new Date(q.expira).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      $('s-resumo').innerHTML = `<div class="resumo">
-        <div><span class="rot">Você envia:</span> <b>${esc(q.envia)} ${esc(q.de)}</b> ${q.usdEnvia != null ? '<span class="cinza">(≈ ' + esc(dolar(q.usdEnvia)) + ')</span>' : ''}</div>
-        <div><span class="rot">Você recebe:</span> <b>≈ ${esc(q.recebe)} ${esc(q.para)}</b> ${q.usdRecebe != null ? '<span class="cinza">(≈ ' + esc(dolar(q.usdRecebe)) + ')</span>' : ''}</div>
-        <div><span class="rot">Cotação:</span> 1 = ${esc(Number(q.taxa).toPrecision(6))}</div>
-        <div><span class="rot">Válida até:</span> ${esc(ate)}</div>
-        ${q.usdEnvia && q.usdRecebe ? `<div><span class="rot">Custo da troca:</span> ≈ ${esc(dolar(q.usdEnvia - q.usdRecebe))} (${esc(((1 - q.usdRecebe / q.usdEnvia) * 100).toFixed(2).replace('.', ','))}%)</div>` : ''}
-      </div>
-      <p class="sub">Ao confirmar, o programa envia o valor para a SideShift (mais a taxa normal da rede) e você recebe a outra moeda em alguns minutos. Você será avisado quando chegar.</p>`;
+      const r = await rpc('swapComparar', pedido);
+      if (!r.cotacoes.length) {
+        $('s-resumo').innerHTML = `<p class="erro">Nenhum serviço aceitou essa troca agora.</p>${r.fora.map((f) => `<div class="cinza">• ${esc(f.nome)}: ${esc(f.motivo)}</div>`).join('')}`;
+        return;
+      }
+      const melhor = r.cotacoes[0];
+      const tempoTxt = (t) => (t ? (t < 90 ? `~${Math.round(t)} s` : `~${Math.round(t / 60)} min`) : '');
+      $('s-resumo').innerHTML = `
+        <p>Você envia <b>${esc(r.envia)} ${esc(r.de)}</b>${r.enviaUsd != null ? ` (≈ ${esc(dolar(r.enviaUsd))})` : ''}. Cotações:</p>
+        <table class="cot"><thead><tr><th></th><th>Serviço</th><th class="dir">Você recebe</th><th class="dir">Custo</th><th>Tempo</th></tr></thead><tbody>
+        ${r.cotacoes.map((q, i) => `<tr class="${i === 0 ? 'melhor' : ''}">
+          <td><input type="radio" name="cot" value="${i}" ${i === 0 ? 'checked' : ''}></td>
+          <td>${i === 0 ? '⭐ ' : ''}<b>${esc(q.nome)}</b>${q.aviso ? `<br><small class="erro">${esc(q.aviso)}</small>` : ''}</td>
+          <td class="dir"><b>${esc(String(Number(q.recebe.toPrecision(8))))} ${esc(r.paraSymbol)}</b>${q.recebeUsd != null ? `<br><small class="cinza">≈ ${esc(dolar(q.recebeUsd))}</small>` : ''}</td>
+          <td class="dir">${q.custoUsd != null ? `${esc(dolar(q.custoUsd))}${r.enviaUsd ? `<br><small class="cinza">${esc(((q.custoUsd / r.enviaUsd) * 100).toFixed(2).replace('.', ','))}%</small>` : ''}` : '—'}</td>
+          <td class="cinza">${esc(tempoTxt(q.tempo))}</td></tr>`).join('')}
+        </tbody></table>
+        ${r.fora.length ? `<details class="ajuda"><summary>Serviços que não cotaram (${r.fora.length})</summary>${r.fora.map((f) => `<div>• ${esc(f.nome)}: ${esc(f.motivo)}</div>`).join('')}</details>` : ''}
+        <p class="sub">Além do custo da troca, você paga a taxa normal da rede para enviar. Valores ≈ porque o preço pode mudar até a troca terminar.</p>`;
       const b = document.createElement('button');
       b.id = 's-confirmar';
       b.className = 'perigo';
-      b.textContent = 'Confirmar troca';
+      const rotulo = () => `Trocar com ${r.cotacoes[Number(document.querySelector('input[name="cot"]:checked').value)].nome.split(' (')[0]}`;
+      b.textContent = rotulo();
       $('s-botoes').appendChild(b);
+      for (const rd of document.querySelectorAll('input[name="cot"]')) rd.onchange = () => { b.textContent = rotulo(); armado = false; b.classList.remove('armado'); };
+      let armado = false;
       b.onclick = async () => {
+        const q = r.cotacoes[Number(document.querySelector('input[name="cot"]:checked').value)];
+        if (!armado) { armado = true; b.textContent = `Confirmar: receber ≈ ${Number(q.recebe.toPrecision(6))} ${r.paraSymbol}`; b.classList.add('armado'); return; }
         b.disabled = true;
         b.textContent = 'Enviando…';
         try {
-          const r = await rpc('swapExecutar', { quoteId: q.quoteId, index: atual, de: $('s-de').value, para: $('s-para').value, destinoIndex: Number($('s-destino').value) });
+          const x = await rpc('swapExecutarProvedor', { provedor: q.provedor, dados: q.dados, ...pedido });
           abrirModal(`<h2 class="ok">Troca iniciada ✓</h2>
-            <p>Você enviou <b>${esc(r.envia)}</b> e vai receber <b>≈ ${esc(r.recebe)}</b>. Isso costuma levar de 2 a 30 minutos, conforme a rede.</p>
-            <p class="sub">Você recebe um aviso quando a troca terminar. Acompanhe também em Atividade.</p>
-            <div class="linha"><button id="s-pagina">Ver na SideShift</button><button id="m-fechar" class="primario">Fechar</button></div>`);
-          $('s-pagina').onclick = () => rpc('openExternal', { url: r.pagina });
+            <p>Pelo <b>${esc(q.nome)}</b>: você enviou <b>${esc(x.envia)}</b> e vai receber <b>≈ ${esc(String(x.recebe))} ${esc(r.paraSymbol)}</b>. Costuma levar de 1 a 30 minutos.</p>
+            <p class="sub">Você recebe um aviso quando terminar. Acompanhe também em Atividade.</p>
+            <div class="linha"><button id="s-pagina">Acompanhar a troca</button><button id="m-fechar" class="primario">Fechar</button></div>`);
+          $('s-pagina').onclick = () => rpc('openExternal', { url: x.pagina });
           $('m-fechar').onclick = fecharModal;
-        } catch (e) { $('m-erro').textContent = e.message; b.disabled = false; b.textContent = 'Confirmar troca'; }
+        } catch (e) { $('m-erro').textContent = e.message; b.disabled = false; armado = false; b.textContent = rotulo(); }
       };
     } catch (e) { $('m-erro').textContent = e.message; }
-    finally { if ($('s-cotar')) { $('s-cotar').disabled = false; $('s-cotar').textContent = 'Ver cotação'; } }
+    finally { if ($('s-cotar')) { $('s-cotar').disabled = false; $('s-cotar').textContent = 'Comparar cotações'; } }
   };
 };
 
@@ -1306,7 +1321,7 @@ async function carregarAtividade() {
       detalhe = `Na carteira <b>${esc(e.carteira)}</b> · rede ${esc(e.rede)}`;
     } else if (e.tipo === 'swap') {
       titulo = `Troca: ${esc(e.valor)} ${esc(e.symbol)} → ${esc(e.recebido || e.paraValor)} ${esc(e.paraSymbol)}`;
-      detalhe = `Carteira <b>${esc(e.carteira)}</b> · de ${esc(e.rede)} para ${esc(e.paraRede)} · <b>${esc(e.status || '')}</b>`;
+      detalhe = `Carteira <b>${esc(e.carteira)}</b> · de ${esc(e.rede)} para ${esc(e.paraRede)}${e.provedor ? ' · via ' + esc(e.provedor) : ''} · <b>${esc(e.status || '')}</b>`;
     } else if (e.tipo === 'taxa') {
       titulo = `Taxa abastecida: ${esc(e.valor)} ${esc(e.symbol)}${e.usd != null ? ' (≈ ' + esc(dolar(e.usd)) + ')' : ''}`;
       detalhe = `De <b>${esc(e.carteira)}</b> para <b>${esc(e.destino)}</b> · rede ${esc(e.rede)}`;
@@ -1321,7 +1336,7 @@ async function carregarAtividade() {
         <div class="li-topo"><b>${titulo}</b><span class="cinza">${esc(quando)}</span></div>
         <div class="ativ-det">${detalhe}</div>
         ${e.hash && e.tipo !== 'swap' ? `<div class="ativ-det">${STATUS[e.status] || ''} · <code>${esc(e.hash.slice(0, 18))}…</code> <button class="mini" data-ver="${i}">Ver transação</button></div>` : ''}
-        ${e.tipo === 'swap' ? `<div class="ativ-det"><button class="mini" data-ver="${i}">Ver troca na SideShift</button></div>` : ''}
+        ${e.tipo === 'swap' ? `<div class="ativ-det"><button class="mini" data-ver="${i}">Acompanhar a troca</button></div>` : ''}
       </div></div>`;
   }).join('');
   for (const b of document.querySelectorAll('[data-ver]')) b.onclick = () => rpc('openExternal', { url: lista[Number(b.dataset.ver)].explorer });
@@ -1520,6 +1535,12 @@ $('btn-config').onclick = async () => {
       <label>toncenter — TON</label>
       <input id="k-toncenter" type="password" value="${esc(s.chaves.toncenter)}" placeholder="cole a API Key" spellcheck="false">
       <p class="ajuda">No Telegram, fale com <b>@tonapibot</b> → "Manage API keys" → crie uma chave para <b>mainnet</b>.</p>
+      <label>ChangeNOW — trocas (swap), inclusive TON, ADA e BCH</label>
+      <input id="k-changenow" type="password" value="${esc(s.chaves.changenow || '')}" placeholder="cole a API Key" spellcheck="false">
+      <p class="ajuda">Em <b>changenow.io/affiliate</b> → entre como parceiro → Partner dashboard → "API key".</p>
+      <label>LI.FI — trocas entre Ethereum, BNB, Polygon, Avalanche e Solana (opcional)</label>
+      <input id="k-lifi" type="password" value="${esc(s.chaves.lifi || '')}" placeholder="opcional — funciona sem chave" spellcheck="false">
+      <p class="ajuda">Opcional: sem chave funciona, só com limite menor de cotações. Chave grátis em <b>portal.li.fi</b>.</p>
       <button id="k-testar">Testar chaves</button>
       <div id="k-res" class="ajuda"></div>
     </div>
@@ -1548,7 +1569,7 @@ $('btn-config').onclick = async () => {
   $('k-testar').onclick = async () => {
     $('k-res').textContent = 'Testando…';
     try {
-      const r = await rpc('testarChaves', { chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value }, tronApiKey: $('c-tronkey').value });
+      const r = await rpc('testarChaves', { chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value, changenow: $('k-changenow').value, lifi: $('k-lifi').value }, tronApiKey: $('c-tronkey').value });
       $('k-res').innerHTML = Object.entries(r).map(([k, v]) => `${v === 'ok' ? '✅' : '❌'} <b>${esc(k)}</b> ${v === 'ok' ? 'funcionando' : esc(v)}`).join('<br>');
     } catch (e) { $('k-res').textContent = e.message; }
   };
@@ -1565,7 +1586,7 @@ $('btn-config').onclick = async () => {
       await rpc('saveSettings', {
         rpc: servidores,
         tronApiKey: $('c-tronkey').value,
-        chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value },
+        chaves: { alchemy: $('k-alchemy').value, helius: $('k-helius').value, toncenter: $('k-toncenter').value, changenow: $('k-changenow').value, lifi: $('k-lifi').value },
         intervalo: Number($('c-intervalo').value),
         todasIntervalo: $('c-todas').value,
         carteiraTaxas: $('c-taxas').value,
