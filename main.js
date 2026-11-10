@@ -530,6 +530,8 @@ async function cicloMonitor() {
 
 handle('monitorFoco', ({ index }) => {
   foco = Number(index);
+  if (!ultimos) { ultimos = readJson(saldosFile()) || {}; carregarCache(); }
+  if (!timerMonitor && !rodando) setTimeout(cicloMonitor, 2000);
   // a carteira aberta "fura a fila": consulta já, em paralelo com o rodízio
   const w = (readJson(dataFile()) || { wallets: [] }).wallets.find((x) => x.index === foco);
   if (w && session) verificarCarteira(w, true).then(enviarResumo).catch(() => {});
