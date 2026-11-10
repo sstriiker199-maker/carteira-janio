@@ -302,7 +302,12 @@ function atualizarCelulas() {
     cel.classList.toggle('erro', !!(sld && sld.erro));
     cel.title = sld && (sld.erro || sld.indisponivel) ? (sld.erro || sld.indisponivel) : '';
     const celUsd = document.querySelector(`[data-usd="${g.symbol}"]`);
-    if (celUsd) celUsd.textContent = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
+    if (celUsd) {
+      const usdTxt = sld && !sld.erro && !sld.zero && sld.usd != null ? '≈ ' + dolar(sld.usd) : '';
+      // envio/recebimento que a rede ainda não confirmou
+      const pend = sld && sld.pendente ? `<span class="pend" title="Já descontado/somado aqui; some quando a rede confirmar">⏳ ${esc(sld.pendente)} a confirmar</span>` : '';
+      celUsd.innerHTML = esc(usdTxt) + (pend ? (usdTxt ? '<br>' : '') + pend : '');
+    }
     const celHoje = document.querySelector(`[data-hoje="${g.symbol}"]`);
     if (celHoje) {
       // ganho/perda de hoje somando todas as redes desta moeda

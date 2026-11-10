@@ -278,3 +278,4 @@ details.ajuda summary { cursor: pointer; }
 .acoes button { padding: 8px 14px; font-size: 13.5px; }
 .cc-end code { font-size: 11px; letter-spacing: .02em; }
 .cc-end + .cc-end { margin-top: 6px; }
+.pend { color: var(--ouro); font-size: 11px; white-space: nowrap; }

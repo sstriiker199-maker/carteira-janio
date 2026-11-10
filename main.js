@@ -434,7 +434,9 @@ function resumo() {
     if (!m) return { index: w.index, totalUsd: null };
     let total = 0;
     for (const [assetId, v] of Object.entries(m)) {
-      const u = valorUsd(assetId, v.raw, v.decimals);
+      let raw = v.raw + ajusteAndamento(w.index, assetId, v.raw);
+      if (raw < 0n) raw = 0n;
+      const u = valorUsd(assetId, raw, v.decimals);
       if (u) total += u;
     }
     return { index: w.index, totalUsd: total };
@@ -506,12 +508,46 @@ const ultimaConsulta = {}; // "índice|moeda" -> horário
 const emVerificacao = new Set();
 const cacheFile = () => path.join(dataDir(), 'saldos-cache.json');
 
-function formatarSaldo(assetId, raw, decimals) {
+// ---------- Envios em andamento: o saldo muda na hora, antes de a rede confirmar ----------
+const emAndamento = {}; // "índice|moeda" -> [{ delta, antes, desde, confirmadoEm, hash }]
+function marcarAndamento(index, assetId, delta, hash) {
+  if (!delta) return;
+  const k = `${index}|${assetId}`;
+  const g = saldosMem[index] && saldosMem[index][assetId];
+  (emAndamento[k] = emAndamento[k] || []).push({ delta, antes: g ? g.raw : null, desde: Date.now(), confirmadoEm: null, hash });
+  ultimaConsulta[k] = 0; // na próxima volta consulta a rede, sem esperar
+}
+function fimAndamento(hash, res) {
+  for (const k of Object.keys(emAndamento)) {
+    if (res === 'falhou') emAndamento[k] = emAndamento[k].filter((p) => p.hash !== hash);
+    else for (const p of emAndamento[k]) if (p.hash === hash && !p.confirmadoEm) p.confirmadoEm = Date.now();
+    ultimaConsulta[k] = 0;
+  }
+}
+// quanto somar ao saldo da rede enquanto o envio não aparece nela
+function ajusteAndamento(index, assetId, rawRede) {
+  const k = `${index}|${assetId}`;
+  const l = emAndamento[k];
+  if (!l || !l.length) return 0n;
+  const agora = Date.now();
+  emAndamento[k] = l.filter((p) => {
+    if (p.antes != null && rawRede !== p.antes) return false; // a rede já mostra a mudança
+    if (p.confirmadoEm && agora - p.confirmadoEm > (p.antes == null ? 60000 : 10 * 60000)) return false;
+    return agora - p.desde < 3 * 3600 * 1000;
+  });
+  return emAndamento[k].reduce((soma, p) => soma + p.delta, 0n);
+}
+
+function formatarSaldo(assetId, rawRede, decimals, index) {
   const sym = getAsset(assetId).asset.symbol;
+  const ajuste = index != null ? ajusteAndamento(index, assetId, rawRede) : 0n;
+  let raw = rawRede + ajuste;
+  if (raw < 0n) raw = 0n;
   const usd = valorUsd(assetId, raw, decimals);
   const v = precos.variacao(sym);
   return {
     assetId, balance: fmt(raw, decimals), zero: raw === 0n, usd,
+    pendente: ajuste !== 0n ? (ajuste > 0n ? '+' : '−') + fmt(ajuste > 0n ? ajuste : -ajuste, decimals) : null,
     preco: precos.preco(sym), var24h: v,
     ganho24h: usd != null && v != null ? usd * v / (100 + v) : null
   };
@@ -524,7 +560,7 @@ function enviarSaldos(index, lista) {
 // Saldos guardados (aparecem na hora ao abrir a carteira, antes de consultar as redes)
 handle('saldosGuardados', ({ index }) => {
   const m = saldosMem[Number(index)] || {};
-  return Object.entries(m).map(([assetId, v]) => formatarSaldo(assetId, v.raw, v.decimals));
+  return Object.entries(m).map(([assetId, v]) => formatarSaldo(assetId, v.raw, v.decimals, Number(index)));
 });
 
 function salvarCache() {
@@ -565,8 +601,9 @@ async function verificarCarteira(w, rapido) {
       const chave = `${w.index}|${a.id}`;
       const guardado = saldosMem[w.index] && saldosMem[w.index][a.id];
       // redes lentas/limitadas (Bitcoin, TON, Cardano…) são consultadas com menos frequência
-      if (net.lento && guardado && agora - (ultimaConsulta[chave] || 0) < net.lento) {
-        publicar(formatarSaldo(a.id, guardado.raw, guardado.decimals));
+      const andando = emAndamento[chave] && emAndamento[chave].length; // envio em andamento: consulta sempre
+      if (net.lento && guardado && !andando && agora - (ultimaConsulta[chave] || 0) < net.lento) {
+        publicar(formatarSaldo(a.id, guardado.raw, guardado.decimals, w.index));
         return;
       }
       let r;
@@ -582,7 +619,7 @@ async function verificarCarteira(w, rapido) {
       if (antes != null && r.raw > antes) avisarEntrada(w, a.id, r.raw - antes, r.decimals);
       ultimos[chave] = r.raw.toString();
       (saldosMem[w.index] = saldosMem[w.index] || {})[a.id] = { raw: r.raw, decimals: r.decimals };
-      publicar(formatarSaldo(a.id, r.raw, r.decimals));
+      publicar(formatarSaldo(a.id, r.raw, r.decimals, w.index));
     });
     despejar();
   } finally {
@@ -1181,12 +1218,24 @@ handle('carteirasComSaldo', ({ assetId, minUsd }) => {
 });
 
 // Confere o saldo real agora (o da lista pode estar desatualizado no rodízio)
+// teste automático (GitHub): simula um envio em andamento e confere o saldo mostrado
+if (process.env.CARTEIRA_TESTE) handle('testeAndamento', () => {
+  saldosMem[999] = { bch: { raw: 100000000n, decimals: 8 } };
+  marcarAndamento(999, 'bch', -25000000n, 'h1');
+  const a = formatarSaldo('bch', 100000000n, 8, 999); // rede ainda não mudou
+  const b = formatarSaldo('bch', 74990000n, 8, 999); // rede já mostra o envio
+  marcarAndamento(999, 'bch', -1000n, 'h2'); fimAndamento('h2', 'falhou');
+  const c = formatarSaldo('bch', 74990000n, 8, 999);
+  delete saldosMem[999];
+  return [a.balance + ' ' + a.pendente, b.balance + ' ' + b.pendente, c.balance + ' ' + c.pendente].join(' | ');
+});
+
 handle('atualizarSaldo', async ({ index, assetId }) => {
   const r = await fetchBalance(Number(index), assetId);
   (saldosMem[Number(index)] = saldosMem[Number(index)] || {})[assetId] = { raw: r.raw, decimals: r.decimals };
   if (ultimos) ultimos[`${index}|${assetId}`] = r.raw.toString();
   ultimaConsulta[`${index}|${assetId}`] = Date.now();
-  return formatarSaldo(assetId, r.raw, r.decimals);
+  return formatarSaldo(assetId, r.raw, r.decimals, Number(index));
 });
 
 // Reconfere na rede o saldo real das moedas que tinham saldo (rápido, mesmo com centenas de carteiras)
@@ -1291,6 +1340,7 @@ async function acompanharEnvio(net, hash, texto, w, idAtiv, index) {
     log('[acompanhar] ' + e.message);
   }
   if (idAtiv) atualizarAtividade(idAtiv, { status: res === 'ok' ? 'confirmado' : res === 'falhou' ? 'falhou' : 'pendente' });
+  fimAndamento(hash, res);
   const titulos = { ok: 'Envio confirmado ✓', falhou: 'Envio FALHOU na rede', pendente: 'Envio ainda não confirmado' };
   alertas.avisar({
     cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela,
@@ -1460,6 +1510,22 @@ async function runTransfer(mode, { index, assetId, to, amount, max, velocidade, 
     hash: e.hash, explorer: linkExplorer(net, e.hash), status: 'processando', memo: memo || undefined
   });
   alertas.avisar({ cfg: settings(), tipo: 'envios', log, aoClicar: abrirJanela, titulo: 'Envio em processamento…', corpo: `${texto} · carteira ${w.name}` });
+  // saldo muda na hora na tela (desconta valor + taxa; soma na carteira de destino, se for sua)
+  try {
+    const taxa = BigInt(e.fee || 0);
+    const nat = nativoDe(net);
+    if (asset.native) marcarAndamento(Number(index), asset.id, -(BigInt(e.value) + taxa), e.hash);
+    else {
+      marcarAndamento(Number(index), asset.id, -BigInt(e.value), e.hash);
+      if (nat) marcarAndamento(Number(index), nat.id, -taxa, e.hash);
+    }
+    if (dest && dest.index !== Number(index)) marcarAndamento(dest.index, asset.id, BigInt(e.value), e.hash);
+    for (const i of new Set([Number(index), dest ? dest.index : null].filter((x) => x != null))) {
+      const m = saldosMem[i] || {};
+      enviarSaldos(i, [asset.id, nat && nat.id].filter((id) => id && m[id]).map((id) => formatarSaldo(id, m[id].raw, m[id].decimals, i)));
+    }
+    enviarResumo();
+  } catch (er) { log('[andamento] ' + er.message); }
   acompanharEnvio(net, e.hash, texto, w, idAtiv, index);
   setTimeout(() => reverificar([Number(index)]).catch(() => {}), 20000);
   setTimeout(cicloMonitor, 1500);
@@ -1681,6 +1747,7 @@ app.whenReady().then(() => {
             await t('cotar ' + de + '->' + para, async () => { const r = await c('swapComparar', { index: 0, de, para, amount: v, destinoIndex: di }); return r.cotacoes.map(q => q.nome.slice(0, 8) + '=' + Number(q.recebe).toPrecision(5)).join(' ; ') + ' | ' + r.fora.filter(f => /deBridge|Exolix/.test(f.nome)).map(f => f.nome + ':' + f.motivo.slice(0, 90)).join(' ; '); });
           }
           await t('tela pares', async () => { await abrirPares('ton'); await new Promise(r => setTimeout(r, 6000)); const n = document.querySelectorAll('#p-lista tbody tr').length; fecharModal(); return n + ' linhas'; });
+          await t('andamento', () => c('testeAndamento'));
           await t('assinar utxo', () => c('testeAssinar'));
           await t('favorito vinculado', async () => { await c('salvarContato', { nome: 'Corretora XRP', rede: 'xrp', endereco: 'rHsMGQEkVNJmpGWs8XUBoTBiAAbwxZN5v3', memo: '555', carteira: 0 }); return (await c('contatos', { rede: 'xrp' })).map(x => x.nome + ' tag ' + x.memo + ' carteira ' + x.carteira); });
           await t('dois favoritos mesmo endereco', async () => { await c('salvarContato', { novo: true, nome: 'Dest A', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 0 }); await c('salvarContato', { novo: true, nome: 'Dest B', rede: 'solana', endereco: 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk', carteira: 1 }); return (await c('contatos', { rede: 'solana' })).map(x => x.nome); });
